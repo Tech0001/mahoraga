@@ -51,18 +51,21 @@ export interface CostTracker {
 }
 
 export interface Config {
+  mcp_url: string
   data_poll_interval_ms: number
   analyst_interval_ms: number
   max_position_value: number
   max_positions: number
   min_sentiment_score: number
   min_analyst_confidence: number
+  sell_sentiment_threshold: number
   take_profit_pct: number
   stop_loss_pct: number
   position_size_pct_of_cash: number
   llm_provider?: 'openai-raw' | 'ai-sdk' | 'cloudflare-gateway'
   llm_model: string
   llm_analyst_model?: string
+  llm_max_tokens: number
   starting_equity?: number
 
   // Stale position management
@@ -73,11 +76,13 @@ export interface Config {
   stale_mid_hold_days?: number
   stale_mid_min_gain_pct?: number
   stale_social_volume_decay?: number
+  stale_no_mentions_hours?: number
 
   // Options config
   options_enabled?: boolean
   options_min_confidence?: number
   options_max_pct_per_trade?: number
+  options_max_total_exposure?: number
   options_min_dte?: number
   options_max_dte?: number
   options_target_delta?: number
@@ -85,6 +90,7 @@ export interface Config {
   options_max_delta?: number
   options_stop_loss_pct?: number
   options_take_profit_pct?: number
+  options_max_positions?: number
 
   // Crypto trading config (24/7)
   crypto_enabled?: boolean
@@ -96,6 +102,55 @@ export interface Config {
 
   // Custom ticker blacklist (insider trading restrictions, etc.)
   ticker_blacklist?: string[]
+
+  // Stock trading toggle (disable for crypto-only mode)
+  stocks_enabled?: boolean
+
+  // DEX Momentum Trading (Solana gems via DexScreener/Jupiter)
+  dex_enabled?: boolean
+  dex_min_age_days?: number
+  dex_max_age_days?: number
+  dex_min_liquidity?: number
+  dex_min_volume_24h?: number
+  dex_min_price_change?: number
+  dex_max_position_sol?: number
+  dex_take_profit_pct?: number
+  dex_stop_loss_pct?: number
+  dex_max_positions?: number
+}
+
+export interface DexPosition {
+  tokenAddress: string
+  symbol: string
+  entryPrice: number
+  entrySol: number
+  entryTime: number
+  tokenAmount: number
+  peakPrice: number
+  currentPrice: number
+  currentValue: number
+  unrealizedPl: number
+  unrealizedPlPct: number
+  holdingHours: number
+}
+
+export interface DexMomentumSignal {
+  symbol: string
+  tokenAddress: string
+  pairAddress: string
+  name: string
+  priceUsd: number
+  priceChange24h: number
+  priceChange1h: number
+  volume24h: number
+  liquidity: number
+  marketCap: number
+  ageHours: number
+  ageDays: number
+  buyRatio24h: number
+  momentumScore: number
+  dexId: string
+  url: string
 }
 
 export interface SignalResearch {
@@ -208,4 +263,27 @@ export interface Status {
   premarketPlan?: PremarketPlan | null
   stalenessAnalysis?: Record<string, StalenessAnalysis>
   overnightActivity?: OvernightActivity
+  // DEX momentum trading
+  dexPositions?: DexPosition[]
+  dexSignals?: DexMomentumSignal[]
+  dexPaperTrading?: {
+    enabled: boolean
+    paperBalance: number
+    realizedPnL: number
+    totalTrades: number
+    winningTrades: number
+    losingTrades: number
+    recentTrades: Array<{
+      symbol: string
+      tokenAddress: string
+      entryPrice: number
+      exitPrice: number
+      entrySol: number
+      entryTime: number
+      exitTime: number
+      pnlPct: number
+      pnlSol: number
+      exitReason: 'take_profit' | 'stop_loss' | 'lost_momentum' | 'manual'
+    }>
+  }
 }

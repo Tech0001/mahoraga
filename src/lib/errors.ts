@@ -44,6 +44,10 @@ export class MahoragaError extends Error {
   }
 }
 
-export function createError(code: ErrorCode, message: string, details?: unknown): MahoragaError {
+export function createError(
+  code: ErrorCode,
+  message: string,
+  details?: unknown
+): MahoragaError {
   return new MahoragaError(code, message, details);
 }

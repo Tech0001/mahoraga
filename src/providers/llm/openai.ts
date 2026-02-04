@@ -1,5 +1,5 @@
 import { createError, ErrorCode } from "../../lib/errors";
-import type { CompletionParams, CompletionResult, LLMProvider } from "../types";
+import type { LLMProvider, CompletionParams, CompletionResult } from "../types";
 
 export interface OpenAIConfig {
   apiKey: string;
@@ -57,7 +57,10 @@ export class OpenAIProvider implements LLMProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw createError(ErrorCode.PROVIDER_ERROR, `OpenAI API error (${response.status}): ${errorText}`);
+      throw createError(
+        ErrorCode.PROVIDER_ERROR,
+        `OpenAI API error (${response.status}): ${errorText}`
+      );
     }
 
     const data = (await response.json()) as OpenAIResponse;

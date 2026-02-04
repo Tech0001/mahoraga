@@ -1,7 +1,7 @@
 import { generateId, hashObject, hmacSign, hmacVerify } from "../lib/utils";
-import type { OrderPreview, PolicyResult } from "../mcp/types";
-import type { D1Client } from "../storage/d1/client";
 import { createApproval, getApprovalByToken, markApprovalUsed } from "../storage/d1/queries/approvals";
+import type { D1Client } from "../storage/d1/client";
+import type { OrderPreview, PolicyResult } from "../mcp/types";
 
 export interface GenerateApprovalParams {
   preview: OrderPreview;
@@ -17,7 +17,9 @@ export interface ApprovalTokenResult {
   expires_at: string;
 }
 
-export async function generateApprovalToken(params: GenerateApprovalParams): Promise<ApprovalTokenResult> {
+export async function generateApprovalToken(
+  params: GenerateApprovalParams
+): Promise<ApprovalTokenResult> {
   const { preview, policyResult, secret, db, ttlSeconds } = params;
 
   const approvalId = generateId();
@@ -100,6 +102,9 @@ export async function validateApprovalToken(params: {
   };
 }
 
-export async function consumeApprovalToken(db: D1Client, approvalId: string): Promise<void> {
+export async function consumeApprovalToken(
+  db: D1Client,
+  approvalId: string
+): Promise<void> {
   await markApprovalUsed(db, approvalId);
 }

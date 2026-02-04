@@ -15,11 +15,6 @@ interface ChartMarker {
   color?: string
 }
 
-interface MarketHoursZone {
-  openIndex: number
-  closeIndex: number
-}
-
 interface LineChartProps {
   series: LineChartSeries[]
   labels?: string[]
@@ -31,7 +26,7 @@ interface LineChartProps {
   animated?: boolean
   formatValue?: (value: number) => string
   markers?: ChartMarker[]
-  marketHours?: MarketHoursZone
+  onHover?: (index: number | null, value: number | null) => void
 }
 
 const variantColors: Record<ChartVariant, { stroke: string; fill: string }> = {
@@ -55,7 +50,6 @@ export function LineChart({
   animated = true,
   formatValue,
   markers,
-  marketHours,
 }: LineChartProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -168,31 +162,6 @@ export function LineChart({
         </g>
       )}
 
-      {marketHours && (
-        <>
-          {marketHours.openIndex > 0 && (
-            <rect
-              x={padding.left}
-              y={padding.top}
-              width={getX(marketHours.openIndex) - padding.left}
-              height={chartHeight}
-              fill="var(--color-hud-bg)"
-              opacity={0.6}
-            />
-          )}
-          {marketHours.closeIndex < maxPoints - 1 && (
-            <rect
-              x={getX(marketHours.closeIndex)}
-              y={padding.top}
-              width={viewBoxWidth - padding.right - getX(marketHours.closeIndex)}
-              height={chartHeight}
-              fill="var(--color-hud-bg)"
-              opacity={0.6}
-            />
-          )}
-        </>
-      )}
-
       {markers && markers.map((marker, i) => (
         <g key={`marker-${i}`}>
           <line
@@ -203,7 +172,7 @@ export function LineChart({
             stroke={marker.color || 'var(--color-hud-text-dim)'}
             strokeWidth={1}
             strokeDasharray="4,4"
-            opacity={0.5}
+            opacity={0.4}
           />
           <text
             x={getX(marker.index)}
@@ -277,57 +246,47 @@ export function LineChart({
         )
       })}
 
-      {hoverIndex !== null && hoverValue !== null && (() => {
-        const hoverX = getX(hoverIndex)
-        const hoverY = getY(hoverValue)
-        const tooltipWidth = 85
-        const tooltipHeight = 38
-        const nearRightEdge = hoverX > viewBoxWidth - padding.right - tooltipWidth - 20
-        const tooltipX = nearRightEdge ? hoverX - tooltipWidth - 12 : hoverX + 12
-        const tooltipY = Math.min(Math.max(hoverY - tooltipHeight / 2, padding.top), padding.top + chartHeight - tooltipHeight)
-        
-        return (
-          <g>
-            <line
-              x1={hoverX}
-              y1={padding.top}
-              x2={hoverX}
-              y2={padding.top + chartHeight}
-              stroke="var(--color-hud-text-dim)"
-              strokeWidth={1}
-              opacity={0.6}
-            />
-            <circle
-              cx={hoverX}
-              cy={hoverY}
-              r={4}
+      {hoverIndex !== null && hoverValue !== null && (
+        <g>
+          <line
+            x1={getX(hoverIndex)}
+            y1={padding.top}
+            x2={getX(hoverIndex)}
+            y2={padding.top + chartHeight}
+            stroke="var(--color-hud-text-dim)"
+            strokeWidth={1}
+            opacity={0.6}
+          />
+          <circle
+            cx={getX(hoverIndex)}
+            cy={getY(hoverValue)}
+            r={4}
+            fill="var(--color-hud-bg)"
+            stroke={variantColors[series[0]?.variant ?? variant].stroke}
+            strokeWidth={2}
+          />
+          <g transform={`translate(${Math.min(getX(hoverIndex) + 8, viewBoxWidth - 90)}, ${Math.max(getY(hoverValue) - 30, padding.top)})`}>
+            <rect
+              x={0}
+              y={0}
+              width={80}
+              height={36}
               fill="var(--color-hud-bg)"
-              stroke={variantColors[series[0]?.variant ?? variant].stroke}
-              strokeWidth={2}
+              stroke="var(--color-hud-line)"
+              strokeWidth={1}
+              rx={2}
             />
-            <g transform={`translate(${tooltipX}, ${tooltipY})`}>
-              <rect
-                x={0}
-                y={0}
-                width={tooltipWidth}
-                height={tooltipHeight}
-                fill="var(--color-hud-bg)"
-                stroke="var(--color-hud-line)"
-                strokeWidth={1}
-                rx={2}
-              />
-              <text x={8} y={15} fill="var(--color-hud-text)" fontSize={11} fontWeight="500">
-                {formatLabel(hoverValue)}
+            <text x={8} y={14} fill="var(--color-hud-text)" fontSize={10} fontWeight="500">
+              {formatLabel(hoverValue)}
+            </text>
+            {hoverLabel && (
+              <text x={8} y={28} fill="var(--color-hud-text-dim)" fontSize={9}>
+                {hoverLabel}
               </text>
-              {hoverLabel && (
-                <text x={8} y={30} fill="var(--color-hud-text-dim)" fontSize={9}>
-                  {hoverLabel}
-                </text>
-              )}
-            </g>
+            )}
           </g>
-        )
-      })()}
+        </g>
+      )}
     </svg>
   )
 }

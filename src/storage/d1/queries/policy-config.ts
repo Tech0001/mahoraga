@@ -1,9 +1,13 @@
+import { D1Client, PolicyConfigRow } from "../client";
 import { nowISO } from "../../../lib/utils";
 import type { PolicyConfig } from "../../../policy/config";
-import type { D1Client, PolicyConfigRow } from "../client";
 
-export async function getPolicyConfig(db: D1Client): Promise<PolicyConfig | null> {
-  const row = await db.executeOne<PolicyConfigRow>(`SELECT * FROM policy_config WHERE id = 1`);
+export async function getPolicyConfig(
+  db: D1Client
+): Promise<PolicyConfig | null> {
+  const row = await db.executeOne<PolicyConfigRow>(
+    `SELECT * FROM policy_config WHERE id = 1`
+  );
 
   if (!row) {
     return null;
@@ -12,7 +16,10 @@ export async function getPolicyConfig(db: D1Client): Promise<PolicyConfig | null
   return JSON.parse(row.config_json) as PolicyConfig;
 }
 
-export async function savePolicyConfig(db: D1Client, config: PolicyConfig): Promise<void> {
+export async function savePolicyConfig(
+  db: D1Client,
+  config: PolicyConfig
+): Promise<void> {
   const configJson = JSON.stringify(config);
 
   await db.run(

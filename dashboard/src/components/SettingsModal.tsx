@@ -9,7 +9,11 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
-  const [localConfig, setLocalConfig] = useState<Config>(config)
+  // Initialize with defaults for new fields that should be true by default
+  const [localConfig, setLocalConfig] = useState<Config>({
+    ...config,
+    stocks_enabled: config.stocks_enabled ?? true,
+  })
   const [saving, setSaving] = useState(false)
   const [apiToken, setApiToken] = useState(localStorage.getItem('mahoraga_api_token') || '')
 
@@ -25,7 +29,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
     window.location.reload()
   }
 
-  const handleChange = <K extends keyof Config>(key: K, value: Config[K]) => {
+  const handleChange = (key: keyof Config, value: string | number) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }))
   }
 
@@ -73,8 +77,20 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
 
           {/* Position Limits */}
           <div>
-            <h3 className="hud-label mb-3 text-hud-primary">Position Limits</h3>
+            <h3 className="hud-label mb-3 text-hud-primary">Stock Trading</h3>
             <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.stocks_enabled ?? true}
+                    onChange={e => handleChange('stocks_enabled', e.target.checked ? 1 : 0)}
+                  />
+                  <span className="hud-label">Enable Stock Trading</span>
+                </label>
+                <p className="text-[9px] text-hud-text-dim mt-1">Disable to trade crypto only (avoids PDT rules with accounts under $25k).</p>
+              </div>
               <div>
                 <label className="hud-label block mb-1">Max Position Value ($)</label>
                 <input
@@ -127,6 +143,16 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                   className="hud-input w-full"
                   value={localConfig.min_analyst_confidence}
                   onChange={e => handleChange('min_analyst_confidence', Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Sell Sentiment Threshold</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  className="hud-input w-full"
+                  value={localConfig.sell_sentiment_threshold}
+                  onChange={e => handleChange('sell_sentiment_threshold', Number(e.target.value))}
                 />
               </div>
             </div>
@@ -193,7 +219,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 <select
                   className="hud-input w-full"
                   value={localConfig.llm_provider || 'openai-raw'}
-                  onChange={e => handleChange('llm_provider', e.target.value as Config['llm_provider'])}
+                  onChange={e => handleChange('llm_provider', e.target.value)}
                 >
                   <option value="openai-raw">OpenAI Direct (default)</option>
                   <option value="ai-sdk">AI SDK (5 providers)</option>
@@ -367,7 +393,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     type="checkbox"
                     className="hud-input w-4 h-4"
                     checked={localConfig.options_enabled || false}
-                    onChange={e => handleChange('options_enabled', e.target.checked)}
+                    onChange={e => handleChange('options_enabled', e.target.checked ? 1 : 0)}
                   />
                   <span className="hud-label">Enable Options Trading</span>
                 </label>
@@ -426,6 +452,16 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 />
               </div>
               <div>
+                <label className="hud-label block mb-1">Max Positions</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.options_max_positions || 3}
+                  onChange={e => handleChange('options_max_positions', Number(e.target.value))}
+                  disabled={!localConfig.options_enabled}
+                />
+              </div>
+              <div>
                 <label className="hud-label block mb-1">Stop Loss (%)</label>
                 <input
                   type="number"
@@ -458,7 +494,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     type="checkbox"
                     className="hud-input w-4 h-4"
                     checked={localConfig.crypto_enabled || false}
-                    onChange={e => handleChange('crypto_enabled', e.target.checked)}
+                    onChange={e => handleChange('crypto_enabled', e.target.checked ? 1 : 0)}
                   />
                   <span className="hud-label">Enable Crypto Trading</span>
                 </label>
@@ -470,7 +506,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                   type="text"
                   className="hud-input w-full"
                   value={(localConfig.crypto_symbols || ['BTC/USD', 'ETH/USD', 'SOL/USD']).join(', ')}
-                  onChange={e => handleChange('crypto_symbols', e.target.value.split(',').map(s => s.trim()))}
+                  onChange={e => handleChange('crypto_symbols', e.target.value.split(',').map(s => s.trim()) as unknown as string)}
                   disabled={!localConfig.crypto_enabled}
                   placeholder="BTC/USD, ETH/USD, SOL/USD, DOGE/USD, AVAX/USD..."
                 />
@@ -519,6 +555,121 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
             </div>
           </div>
 
+          {/* DEX Momentum Trading */}
+          <div>
+            <h3 className="hud-label mb-3 text-hud-success">DEX Momentum (Solana Gems)</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.dex_enabled || false}
+                    onChange={e => handleChange('dex_enabled', e.target.checked ? 1 : 0)}
+                  />
+                  <span className="hud-label">Enable DEX Momentum Trading</span>
+                </label>
+                <p className="text-[9px] text-hud-text-dim mt-1">Hunt Solana gems via DexScreener. Filters 3-14 day old tokens with proven momentum (not brand new rugs).</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Min Age (days)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_min_age_days || 3}
+                  onChange={e => handleChange('dex_min_age_days', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Skip brand-new honeypots</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Max Age (days)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_max_age_days || 14}
+                  onChange={e => handleChange('dex_max_age_days', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Before CEX listing hype fades</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Min Liquidity ($)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_min_liquidity || 50000}
+                  onChange={e => handleChange('dex_min_liquidity', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Min Volume 24h ($)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_min_volume_24h || 10000}
+                  onChange={e => handleChange('dex_min_volume_24h', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Min Price Change 24h (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_min_price_change || 5}
+                  onChange={e => handleChange('dex_min_price_change', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Max Position (SOL)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  className="hud-input w-full"
+                  value={localConfig.dex_max_position_sol || 0.5}
+                  onChange={e => handleChange('dex_max_position_sol', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Max Positions</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_max_positions || 5}
+                  onChange={e => handleChange('dex_max_positions', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Take Profit (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_take_profit_pct || 50}
+                  onChange={e => handleChange('dex_take_profit_pct', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Stop Loss (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_stop_loss_pct || 15}
+                  onChange={e => handleChange('dex_stop_loss_pct', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div className="col-span-2 p-2 bg-hud-bg-dark rounded border border-hud-line">
+                <p className="text-[9px] text-hud-warning">⚠️ Requires Solana wallet setup for actual trades. Currently monitors only.</p>
+              </div>
+            </div>
+          </div>
+
           {/* Stale Position Management */}
           <div>
             <h3 className="hud-label mb-3 text-hud-warning">Stale Position Management</h3>
@@ -529,7 +680,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     type="checkbox"
                     className="hud-input w-4 h-4"
                     checked={localConfig.stale_position_enabled ?? true}
-                    onChange={e => handleChange('stale_position_enabled', e.target.checked)}
+                    onChange={e => handleChange('stale_position_enabled', e.target.checked ? 1 : 0)}
                   />
                   <span className="hud-label">Enable Stale Position Detection</span>
                 </label>
@@ -566,6 +717,17 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                   disabled={!localConfig.stale_position_enabled}
                 />
                 <p className="text-[9px] text-hud-text-dim mt-1">Exit if volume drops to this % of entry</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">No Mentions Hours</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.stale_no_mentions_hours || 8}
+                  onChange={e => handleChange('stale_no_mentions_hours', Number(e.target.value))}
+                  disabled={!localConfig.stale_position_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Exit if no mentions for N hours</p>
               </div>
             </div>
           </div>

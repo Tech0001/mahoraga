@@ -1,12 +1,16 @@
 import type { Env } from "../env.d";
-import { createAlpacaProviders } from "../providers/alpaca";
-import { createSECEdgarProvider } from "../providers/news/sec-edgar";
 import { createD1Client } from "../storage/d1/client";
+import { createAlpacaProviders } from "../providers/alpaca";
+import { resetDailyLoss, getRiskState } from "../storage/d1/queries/risk-state";
 import { cleanupExpiredApprovals } from "../storage/d1/queries/approvals";
-import { insertRawEvent, rawEventExists } from "../storage/d1/queries/events";
-import { getRiskState, resetDailyLoss } from "../storage/d1/queries/risk-state";
+import {
+  insertRawEvent,
+  rawEventExists,
+} from "../storage/d1/queries/events";
+import { createSECEdgarProvider } from "../providers/news/sec-edgar";
 
 export async function handleCronEvent(cronId: string, env: Env): Promise<void> {
+
   switch (cronId) {
     case "*/5 13-20 * * 1-5":
       await runEventIngestion(env);
@@ -82,12 +86,11 @@ async function runMarketOpenPrep(env: Env): Promise<void> {
 
   try {
     const riskState = await getRiskState(db);
-    console.log(
-      `Risk state at open: kill_switch=${riskState.kill_switch_active}, daily_loss=${riskState.daily_loss_usd}`
-    );
+    console.log(`Risk state at open: kill_switch=${riskState.kill_switch_active}, daily_loss=${riskState.daily_loss_usd}`);
 
     const cleaned = await cleanupExpiredApprovals(db);
     console.log(`Cleaned up ${cleaned} expired approvals`);
+
   } catch (error) {
     console.error("Market open prep error:", error);
   }
@@ -107,6 +110,7 @@ async function runMarketCloseCleanup(env: Env): Promise<void> {
 
     const cleaned = await cleanupExpiredApprovals(db);
     console.log(`Cleaned up ${cleaned} expired approvals`);
+
   } catch (error) {
     console.error("Market close cleanup error:", error);
   }
@@ -123,6 +127,7 @@ async function runMidnightReset(env: Env): Promise<void> {
 
     const cleaned = await cleanupExpiredApprovals(db);
     console.log(`Cleaned up ${cleaned} expired approvals`);
+
   } catch (error) {
     console.error("Midnight reset error:", error);
   }

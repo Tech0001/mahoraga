@@ -12,7 +12,9 @@ export class AlpacaClient {
   private headers: Record<string, string>;
 
   constructor(config: AlpacaClientConfig) {
-    this.tradingBaseUrl = config.paper ? "https://paper-api.alpaca.markets" : "https://api.alpaca.markets";
+    this.tradingBaseUrl = config.paper
+      ? "https://paper-api.alpaca.markets"
+      : "https://api.alpaca.markets";
     this.dataBaseUrl = "https://data.alpaca.markets";
     this.headers = {
       "APCA-API-KEY-ID": config.apiKey,
@@ -21,12 +23,20 @@ export class AlpacaClient {
     };
   }
 
-  async tradingRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async tradingRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<T> {
     const url = `${this.tradingBaseUrl}${path}`;
     return this.request<T>(method, url, body);
   }
 
-  async dataRequest<T>(method: string, path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+  async dataRequest<T>(
+    method: string,
+    path: string,
+    params?: Record<string, string | number | undefined>
+  ): Promise<T> {
     let url = `${this.dataBaseUrl}${path}`;
 
     if (params) {
@@ -45,7 +55,11 @@ export class AlpacaClient {
     return this.request<T>(method, url);
   }
 
-  private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    url: string,
+    body?: unknown
+  ): Promise<T> {
     const options: RequestInit = {
       method,
       headers: this.headers,
@@ -84,7 +98,10 @@ export class AlpacaClient {
         throw createError(ErrorCode.RATE_LIMITED, `Alpaca rate limit exceeded: ${errorMessage}`);
       }
 
-      throw createError(ErrorCode.PROVIDER_ERROR, `Alpaca API error (${response.status}): ${errorMessage}`);
+      throw createError(
+        ErrorCode.PROVIDER_ERROR,
+        `Alpaca API error (${response.status}): ${errorMessage}`
+      );
     }
 
     if (response.status === 204) {

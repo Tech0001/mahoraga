@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "Bash(npm install)",
+      "Bash(npx wrangler d1 create:*)",
+      "Bash(npx wrangler whoami:*)",
+      "Bash(npx wrangler:*)",
+      "Bash(openssl rand:*)",
+      "Bash(curl:*)",
+      "Bash(npm run build:*)",
+      "WebFetch(domain:docs.dexscreener.com)",
+      "Bash(python3:*)",
+      "Bash(__NEW_LINE_d772a3f83f741e11__ echo -e \"\\\\n1. Token Boosts \\(trending\\):\")",
+      "Bash(__NEW_LINE_9f9f261420bc319e__ echo -e \"\\\\n2. Search for ''sol'':\")",
+      "Bash(# Check auth logs from overnight echo \"\"=== Authentication requests \\(last 24h\\) ===\"\" journalctl -u polkit --since \"\"yesterday\"\")",
+      "Bash(grep:*)",
+      "Bash(# Check what was happening around that time echo \"\"=== System activity around 08:22 ===\"\" journalctl --since \"\"2026-02-04 08:20\"\" --until \"\"2026-02-04 08:25\"\" | grep -v \"\"polkitd\\\\|wrangler\\\\|node\"\" | head -30 echo -e \"\"\\\\n=== Any cron jobs that ran overnight? ===\"\" grep -r \"\"CRON\"\" /var/log/syslog* | grep \"\"Feb 4\"\" | tail -10 echo -e \"\"\\\\n=== Scheduled tasks \\(anacron/at\\) ===\"\" cat /var/spool/anacron/* && head -20 ~/.local/share/recently-used.xbel)"
+    ]
+  }
+}

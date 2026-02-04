@@ -1,19 +1,19 @@
 import type { Env } from "../../env.d";
 import type { LLMProvider } from "../types";
+import { createOpenAIProvider } from "./openai";
 import { createAISDKProvider, SUPPORTED_PROVIDERS, type SupportedProvider } from "./ai-sdk";
 import { createCloudflareGatewayProvider } from "./cloudflare-gateway";
-import { createOpenAIProvider } from "./openai";
 
 export type LLMProviderType = "openai-raw" | "ai-sdk" | "cloudflare-gateway";
 
 /**
  * Factory function to create LLM provider based on environment configuration.
- *
+ * 
  * Provider selection (via LLM_PROVIDER env):
  * - "openai-raw": Direct OpenAI API calls (default, backward compatible)
  * - "ai-sdk": Vercel AI SDK with 5 providers (OpenAI, Anthropic, Google, xAI, DeepSeek)
  * - "cloudflare-gateway": Cloudflare AI Gateway (/compat) for unified access
- *
+ * 
  * @param env - Environment variables
  * @returns LLMProvider instance or null if no valid configuration
  */
@@ -25,7 +25,11 @@ export function createLLMProvider(env: Env): LLMProvider | null {
 
   switch (providerType) {
     case "cloudflare-gateway": {
-      if (!env.CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID || !env.CLOUDFLARE_AI_GATEWAY_ID || !env.CLOUDFLARE_AI_GATEWAY_TOKEN) {
+      if (
+        !env.CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID ||
+        !env.CLOUDFLARE_AI_GATEWAY_ID ||
+        !env.CLOUDFLARE_AI_GATEWAY_TOKEN
+      ) {
         console.warn(
           "LLM_PROVIDER=cloudflare-gateway requires CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID, CLOUDFLARE_AI_GATEWAY_ID, and CLOUDFLARE_AI_GATEWAY_TOKEN"
         );
@@ -67,6 +71,8 @@ export function createLLMProvider(env: Env): LLMProvider | null {
 
       return createAISDKProvider({ model, apiKeys, openaiBaseUrl });
     }
+
+    case "openai-raw":
     default:
       // Backward compatible: use existing OpenAI provider
       if (!env.OPENAI_API_KEY) {
@@ -102,6 +108,7 @@ export function isLLMConfigured(env: Env): boolean {
         env.XAI_API_KEY ||
         env.DEEPSEEK_API_KEY
       );
+    case "openai-raw":
     default:
       return !!env.OPENAI_API_KEY;
   }

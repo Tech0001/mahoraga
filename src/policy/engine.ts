@@ -1,9 +1,9 @@
 /**
  * Policy Engine - Trade Validation System
- *
+ * 
  * This is the safety layer that validates every order before execution.
  * All trades must pass through the policy engine to get an approval token.
- *
+ * 
  * Checks performed:
  * - Kill switch status (emergency halt)
  * - Loss cooldown period
@@ -16,22 +16,15 @@
  * - Maximum open positions
  * - Short selling restrictions
  * - Available buying power
- *
+ * 
  * If all checks pass, an approval token is generated that must be used
  * within the configured TTL (default 5 minutes) to execute the order.
  */
 
-import type {
-  OptionsOrderPreview,
-  OptionsPolicyResult,
-  OrderPreview,
-  PolicyResult,
-  PolicyViolation,
-  PolicyWarning,
-} from "../mcp/types";
-import type { Account, MarketClock, Position } from "../providers/types";
+import type { PolicyConfig, OptionsStrategy } from "./config";
+import type { OrderPreview, PolicyResult, PolicyViolation, PolicyWarning, OptionsOrderPreview, OptionsPolicyResult } from "../mcp/types";
+import type { Account, Position, MarketClock } from "../providers/types";
 import type { RiskState } from "../storage/d1/queries/risk-state";
-import type { OptionsStrategy, PolicyConfig } from "./config";
 
 export interface PolicyContext {
   order: OrderPreview;
@@ -115,7 +108,11 @@ export class PolicyEngine {
     }
   }
 
-  private checkTradingHours(ctx: PolicyContext, violations: PolicyViolation[], warnings: PolicyWarning[]): void {
+  private checkTradingHours(
+    ctx: PolicyContext,
+    violations: PolicyViolation[],
+    warnings: PolicyWarning[]
+  ): void {
     if (!this.config.trading_hours_only) return;
 
     // Crypto trades 24/7 — skip market hours check
@@ -188,11 +185,17 @@ export class PolicyEngine {
     }
   }
 
-  private checkPositionSize(ctx: PolicyContext, violations: PolicyViolation[], warnings: PolicyWarning[]): void {
+  private checkPositionSize(
+    ctx: PolicyContext,
+    violations: PolicyViolation[],
+    warnings: PolicyWarning[]
+  ): void {
     if (ctx.order.side !== "buy") return;
 
     const estimatedNotional = this.estimateNotional(ctx.order);
-    const existingPosition = ctx.positions.find((p) => p.symbol.toUpperCase() === ctx.order.symbol.toUpperCase());
+    const existingPosition = ctx.positions.find(
+      (p) => p.symbol.toUpperCase() === ctx.order.symbol.toUpperCase()
+    );
     const existingValue = existingPosition?.market_value ?? 0;
     const totalPositionValue = estimatedNotional + existingValue;
     const positionPct = totalPositionValue / ctx.account.equity;
@@ -215,7 +218,9 @@ export class PolicyEngine {
   private checkOpenPositionsLimit(ctx: PolicyContext, violations: PolicyViolation[]): void {
     if (ctx.order.side !== "buy") return;
 
-    const existingPosition = ctx.positions.find((p) => p.symbol.toUpperCase() === ctx.order.symbol.toUpperCase());
+    const existingPosition = ctx.positions.find(
+      (p) => p.symbol.toUpperCase() === ctx.order.symbol.toUpperCase()
+    );
     const isNewPosition = !existingPosition;
     const openPositionCount = ctx.positions.length;
 
@@ -233,7 +238,9 @@ export class PolicyEngine {
     if (ctx.order.side !== "sell") return;
     if (this.config.allow_short_selling) return;
 
-    const existingPosition = ctx.positions.find((p) => p.symbol.toUpperCase() === ctx.order.symbol.toUpperCase());
+    const existingPosition = ctx.positions.find(
+      (p) => p.symbol.toUpperCase() === ctx.order.symbol.toUpperCase()
+    );
 
     if (!existingPosition) {
       violations.push({
@@ -290,7 +297,7 @@ export class PolicyEngine {
     this.checkCooldown(ctx as unknown as PolicyContext, violations);
     this.checkDailyLossLimit(ctx as unknown as PolicyContext, violations);
     this.checkTradingHours(ctx as unknown as PolicyContext, violations, warnings);
-
+    
     this.checkOptionsEnabled(violations);
     this.checkOptionsDTE(ctx, violations);
     this.checkOptionsDelta(ctx, violations, warnings);
@@ -342,7 +349,11 @@ export class PolicyEngine {
     }
   }
 
-  private checkOptionsDelta(ctx: OptionsPolicyContext, violations: PolicyViolation[], warnings: PolicyWarning[]): void {
+  private checkOptionsDelta(
+    ctx: OptionsPolicyContext,
+    violations: PolicyViolation[],
+    warnings: PolicyWarning[]
+  ): void {
     const { delta } = ctx.order;
     if (delta === undefined) {
       warnings.push({
@@ -428,7 +439,7 @@ export class PolicyEngine {
   ): void {
     if (ctx.order.side !== "buy") return;
 
-    const optionsPositions = ctx.positions.filter((p) => p.asset_class === "us_option");
+    const optionsPositions = ctx.positions.filter(p => p.asset_class === "us_option");
     const currentExposure = optionsPositions.reduce((sum, p) => sum + Math.abs(p.market_value), 0);
     const orderCost = this.estimateOptionsCost(ctx.order);
     const newTotalExposure = currentExposure + orderCost;
@@ -452,11 +463,11 @@ export class PolicyEngine {
   private checkOptionsPositionCount(ctx: OptionsPolicyContext, violations: PolicyViolation[]): void {
     if (ctx.order.side !== "buy") return;
 
-    const optionsPositions = ctx.positions.filter((p) => p.asset_class === "us_option");
+    const optionsPositions = ctx.positions.filter(p => p.asset_class === "us_option");
     const existingPosition = optionsPositions.find(
-      (p) => p.symbol.toUpperCase() === ctx.order.contract_symbol.toUpperCase()
+      p => p.symbol.toUpperCase() === ctx.order.contract_symbol.toUpperCase()
     );
-
+    
     if (!existingPosition && optionsPositions.length >= this.config.options.max_option_positions) {
       violations.push({
         rule: "options_max_positions",
@@ -471,9 +482,9 @@ export class PolicyEngine {
     if (!this.config.options.no_averaging_down) return;
     if (ctx.order.side !== "buy") return;
 
-    const optionsPositions = ctx.positions.filter((p) => p.asset_class === "us_option");
+    const optionsPositions = ctx.positions.filter(p => p.asset_class === "us_option");
     const existingPosition = optionsPositions.find(
-      (p) => p.symbol.toUpperCase() === ctx.order.contract_symbol.toUpperCase()
+      p => p.symbol.toUpperCase() === ctx.order.contract_symbol.toUpperCase()
     );
 
     if (existingPosition && existingPosition.unrealized_pl < 0) {
