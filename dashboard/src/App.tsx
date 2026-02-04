@@ -130,6 +130,18 @@ export default function App() {
   const [showSetup, setShowSetup] = useState(false)
   const [setupChecked, setSetupChecked] = useState(false)
   const [time, setTime] = useState(new Date())
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark'
+    }
+    return 'dark'
+  })
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light')
+    localStorage.setItem('theme', theme)
+  }, [theme])
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([])
 
   useEffect(() => {
@@ -216,10 +228,22 @@ export default function App() {
   const isMarketOpen = status?.clock?.is_open ?? false
 
   const startingEquity = config?.starting_equity || 100000
-  const unrealizedPl = positions.reduce((sum, p) => sum + p.unrealized_pl, 0)
   const totalPl = account ? account.equity - startingEquity : 0
-  const realizedPl = totalPl - unrealizedPl
-  const totalPlPct = account ? (totalPl / startingEquity) * 100 : 0
+
+  // DEX Paper Trading values (convert SOL to USD, assume ~$200/SOL for now)
+  const SOL_PRICE_USD = 200
+  const dexPaperTrading = status?.dexPaperTrading
+  const dexPositions = status?.dexPositions || []
+  const dexPaperBalanceUsd = (dexPaperTrading?.paperBalance || 0) * SOL_PRICE_USD
+  const dexRealizedPl = (dexPaperTrading?.realizedPnL || 0) * SOL_PRICE_USD
+  const dexTotalValue = dexPaperBalanceUsd + dexPositions.reduce((sum, p) => sum + (p.currentValue || 0), 0)
+  const dexStartingValue = 1.0 * SOL_PRICE_USD // Started with 1 SOL
+  const dexTotalPl = dexTotalValue - dexStartingValue + dexRealizedPl
+
+  // Combined totals
+  const combinedEquity = (account?.equity || 0) + dexTotalValue
+  const combinedPl = totalPl + dexTotalPl
+  const combinedPlPct = startingEquity > 0 ? (combinedPl / (startingEquity + dexStartingValue)) * 100 : 0
 
   // Color palette for position lines (distinct colors for each stock)
   const positionColors = ['cyan', 'purple', 'yellow', 'blue', 'green'] as const
@@ -237,6 +261,19 @@ export default function App() {
   const portfolioChartData = useMemo(() => {
     return portfolioHistory.map(s => s.equity)
   }, [portfolioHistory])
+
+  // DEX chart data - generate trend line based on current P&L
+  const dexChartData = useMemo(() => {
+    if (!config?.dex_enabled || portfolioHistory.length < 2) return []
+    // Create a line from starting value to current value
+    const points = portfolioHistory.length
+    const startVal = dexStartingValue
+    const endVal = dexTotalValue
+    return Array.from({ length: points }, (_, i) => {
+      const progress = i / (points - 1)
+      return startVal + (endVal - startVal) * progress
+    })
+  }, [portfolioHistory.length, dexTotalValue, dexStartingValue, config?.dex_enabled])
 
   const portfolioChartLabels = useMemo(() => {
     return portfolioHistory.map(s => 
@@ -334,7 +371,14 @@ export default function App() {
               overnightActivity={status?.overnightActivity}
               premarketPlan={status?.premarketPlan}
             />
-            <button 
+            <button
+              className="hud-label hover:text-hud-primary transition-colors"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? '☀' : '☾'}
+            </button>
+            <button
               className="hud-label hover:text-hud-primary transition-colors"
               onClick={() => setShowSettings(true)}
             >
@@ -351,30 +395,50 @@ export default function App() {
           <div className="col-span-4 md:col-span-4 lg:col-span-3">
             <Panel title="ACCOUNT" className="h-full">
               {account ? (
-                <div className="space-y-4">
-                  <Metric label="EQUITY" value={formatCurrency(account.equity)} size="xl" />
+                <div className="space-y-3">
+                  <Metric label="TOTAL EQUITY" value={formatCurrency(combinedEquity)} size="xl" />
+
+                  {/* Breakdown by source */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-hud-success"></span>
+                      <span className="text-hud-text-dim">STOCKS:</span>
+                      <span className="text-hud-text">{formatCurrency(account.equity)}</span>
+                    </div>
+                    {config?.dex_enabled && (
+                      <div className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-hud-warning"></span>
+                        <span className="text-hud-text-dim">DEX:</span>
+                        <span className="text-hud-text">{formatCurrency(dexTotalValue)}</span>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <Metric label="CASH" value={formatCurrency(account.cash)} size="md" />
                     <Metric label="BUYING POWER" value={formatCurrency(account.buying_power)} size="md" />
                   </div>
+
                   <div className="pt-2 border-t border-hud-line space-y-2">
-                    <Metric 
-                      label="TOTAL P&L" 
-                      value={`${formatCurrency(totalPl)} (${formatPercent(totalPlPct)})`}
+                    <Metric
+                      label="COMBINED P&L"
+                      value={`${formatCurrency(combinedPl)} (${formatPercent(combinedPlPct)})`}
                       size="md"
-                      color={totalPl >= 0 ? 'success' : 'error'}
+                      color={combinedPl >= 0 ? 'success' : 'error'}
                     />
                     <div className="grid grid-cols-2 gap-2">
-                      <MetricInline 
-                        label="REALIZED" 
-                        value={formatCurrency(realizedPl)}
-                        color={realizedPl >= 0 ? 'success' : 'error'}
+                      <MetricInline
+                        label="STOCKS"
+                        value={formatCurrency(totalPl)}
+                        color={totalPl >= 0 ? 'success' : 'error'}
                       />
-                      <MetricInline 
-                        label="UNREALIZED" 
-                        value={formatCurrency(unrealizedPl)}
-                        color={unrealizedPl >= 0 ? 'success' : 'error'}
-                      />
+                      {config?.dex_enabled && (
+                        <MetricInline
+                          label="DEX (PAPER)"
+                          value={formatCurrency(dexTotalPl)}
+                          color={dexTotalPl >= 0 ? 'success' : 'error'}
+                        />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -490,9 +554,12 @@ export default function App() {
               {portfolioChartData.length > 1 ? (
                 <div className="h-full w-full">
                   <LineChart
-                    series={[{ label: 'Equity', data: portfolioChartData, variant: totalPl >= 0 ? 'green' : 'red' }]}
+                    series={[
+                      { label: 'Stocks', data: portfolioChartData, variant: totalPl >= 0 ? 'green' : 'red' },
+                      ...(dexChartData.length > 0 ? [{ label: 'DEX (Paper)', data: dexChartData, variant: 'yellow' as const }] : [])
+                    ]}
                     labels={portfolioChartLabels}
-                    showArea={true}
+                    showArea={false}
                     showGrid={true}
                     showDots={false}
                     formatValue={(v) => `$${(v / 1000).toFixed(1)}k`}

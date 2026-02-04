@@ -3,16 +3,17 @@
 @theme {
   --color-hud-bg: #0a0c0e;
   --color-hud-bg-panel: #0d1012;
-  
+  --color-hud-bg-lighter: #141618;
+
   --color-hud-primary: #7a9ba8;
   --color-hud-dim: #3a4a52;
   --color-hud-line: rgba(122, 155, 168, 0.15);
   --color-hud-border: rgba(122, 155, 168, 0.2);
-  
+
   --color-hud-text: #7a9ba8;
   --color-hud-text-dim: #4a5a62;
   --color-hud-text-bright: #c8dce4;
-  
+
   --color-hud-success: #4a9868;
   --color-hud-warning: #b89848;
   --color-hud-error: #b84848;
@@ -22,8 +23,34 @@
   --color-hud-green: #4a9868;
   --color-hud-yellow: #b89848;
   --color-hud-red: #b84848;
-  
+
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+}
+
+/* Light mode overrides */
+html.light {
+  --color-hud-bg: #f0f2f4;
+  --color-hud-bg-panel: #ffffff;
+  --color-hud-bg-lighter: #e8eaec;
+
+  --color-hud-primary: #2a4a58;
+  --color-hud-dim: #8a9aa2;
+  --color-hud-line: rgba(42, 74, 88, 0.15);
+  --color-hud-border: rgba(42, 74, 88, 0.25);
+
+  --color-hud-text: #2a4a58;
+  --color-hud-text-dim: #6a7a82;
+  --color-hud-text-bright: #0a1a22;
+
+  --color-hud-success: #2a8848;
+  --color-hud-warning: #986818;
+  --color-hud-error: #c83838;
+  --color-hud-purple: #6a4a98;
+  --color-hud-cyan: #2a7a98;
+  --color-hud-blue: #3a5a98;
+  --color-hud-green: #2a8848;
+  --color-hud-yellow: #986818;
+  --color-hud-red: #c83838;
 }
 
 @layer base {
