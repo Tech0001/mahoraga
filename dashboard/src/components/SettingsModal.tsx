@@ -25,7 +25,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
     window.location.reload()
   }
 
-  const handleChange = (key: keyof Config, value: string | number) => {
+  const handleChange = <K extends keyof Config>(key: K, value: Config[K]) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }))
   }
 
@@ -203,7 +203,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 <select
                   className="hud-input w-full"
                   value={localConfig.llm_provider || 'openai-raw'}
-                  onChange={e => handleChange('llm_provider', e.target.value)}
+                  onChange={e => handleChange('llm_provider', e.target.value as Config['llm_provider'])}
                 >
                   <option value="openai-raw">OpenAI Direct (default)</option>
                   <option value="ai-sdk">AI SDK (5 providers)</option>
@@ -377,7 +377,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     type="checkbox"
                     className="hud-input w-4 h-4"
                     checked={localConfig.options_enabled || false}
-                    onChange={e => handleChange('options_enabled', e.target.checked ? 1 : 0)}
+                    onChange={e => handleChange('options_enabled', e.target.checked)}
                   />
                   <span className="hud-label">Enable Options Trading</span>
                 </label>
@@ -478,7 +478,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     type="checkbox"
                     className="hud-input w-4 h-4"
                     checked={localConfig.crypto_enabled || false}
-                    onChange={e => handleChange('crypto_enabled', e.target.checked ? 1 : 0)}
+                    onChange={e => handleChange('crypto_enabled', e.target.checked)}
                   />
                   <span className="hud-label">Enable Crypto Trading</span>
                 </label>
@@ -490,7 +490,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                   type="text"
                   className="hud-input w-full"
                   value={(localConfig.crypto_symbols || ['BTC/USD', 'ETH/USD', 'SOL/USD']).join(', ')}
-                  onChange={e => handleChange('crypto_symbols', e.target.value.split(',').map(s => s.trim()) as unknown as string)}
+                  onChange={e => handleChange('crypto_symbols', e.target.value.split(',').map(s => s.trim()))}
                   disabled={!localConfig.crypto_enabled}
                   placeholder="BTC/USD, ETH/USD, SOL/USD, DOGE/USD, AVAX/USD..."
                 />
@@ -549,7 +549,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     type="checkbox"
                     className="hud-input w-4 h-4"
                     checked={localConfig.stale_position_enabled ?? true}
-                    onChange={e => handleChange('stale_position_enabled', e.target.checked ? 1 : 0)}
+                    onChange={e => handleChange('stale_position_enabled', e.target.checked)}
                   />
                   <span className="hud-label">Enable Stale Position Detection</span>
                 </label>
