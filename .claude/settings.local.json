@@ -29,7 +29,9 @@
       "Bash(TOKEN=\"CUy+bF5UVeei0O4aBQ5t0DIeHPcCER2Z5K17FGjbMUzCk9YXJI7w4KuRz9XneTmi\" curl -s -m 30 -H \"Authorization: Bearer $TOKEN\" \"http://localhost:8787/agent/logs?limit=20\")",
       "Bash(pgrep:*)",
       "Bash(lsof:*)",
-      "Bash(__NEW_LINE_7c84d5f56ca9d907__ echo \"\")"
+      "Bash(__NEW_LINE_7c84d5f56ca9d907__ echo \"\")",
+      "Bash(wc:*)",
+      "Bash(ls:*)"
     ]
   }
 }

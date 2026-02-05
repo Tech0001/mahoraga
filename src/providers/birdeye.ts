@@ -46,10 +46,13 @@ export interface ChartAnalysis {
 
 const BIRDEYE_BASE = "https://public-api.birdeye.so";
 
+// Module-level timestamp to persist across provider instances
+// This ensures rate limiting works even when new BirdeyeProvider instances are created
+let globalLastRequest = 0;
+
 export class BirdeyeProvider {
   private apiKey: string;
-  private lastRequest = 0;
-  private rateLimitDelay = 1500; // 1 req/sec on free tier, with safety margin
+  private rateLimitDelay = 2500; // 1 req/sec on free tier, with generous safety margin
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -57,11 +60,11 @@ export class BirdeyeProvider {
 
   private async throttle(): Promise<void> {
     const now = Date.now();
-    const elapsed = now - this.lastRequest;
+    const elapsed = now - globalLastRequest;
     if (elapsed < this.rateLimitDelay) {
       await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay - elapsed));
     }
-    this.lastRequest = Date.now();
+    globalLastRequest = Date.now();
   }
 
   /**
@@ -75,23 +78,42 @@ export class BirdeyeProvider {
     interval: "1m" | "5m" | "15m" | "30m" | "1H" | "4H" | "1D" = "15m",
     limit: number = 100
   ): Promise<OHLCVCandle[]> {
-    await this.throttle();
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-    const url = `${BIRDEYE_BASE}/defi/ohlcv?address=${tokenAddress}&type=${interval}&time_from=${Math.floor(Date.now() / 1000) - (limit * this.intervalToSeconds(interval))}&time_to=${Math.floor(Date.now() / 1000)}`;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      await this.throttle();
 
-    const res = await fetch(url, {
-      headers: {
-        "X-API-KEY": this.apiKey,
-        "x-chain": "solana",
-      },
-    });
+      const url = `${BIRDEYE_BASE}/defi/ohlcv?address=${tokenAddress}&type=${interval}&time_from=${Math.floor(Date.now() / 1000) - (limit * this.intervalToSeconds(interval))}&time_to=${Math.floor(Date.now() / 1000)}`;
 
-    if (!res.ok) {
+      const res = await fetch(url, {
+        headers: {
+          "X-API-KEY": this.apiKey,
+          "x-chain": "solana",
+        },
+      });
+
+      if (res.ok) {
+        const data: OHLCVResponse = await res.json();
+        return data.data?.items || [];
+      }
+
+      // Handle rate limiting with exponential backoff
+      if (res.status === 429) {
+        const backoffMs = Math.min(5000 * Math.pow(2, attempt), 15000); // 5s, 10s, 15s max
+        console.log(`[Birdeye] Rate limited (429), waiting ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        globalLastRequest = Date.now(); // Reset throttle after backoff
+        lastError = new Error(`Birdeye API error: 429 (rate limited)`);
+        continue;
+      }
+
+      // Non-retryable error
       throw new Error(`Birdeye API error: ${res.status}`);
     }
 
-    const data: OHLCVResponse = await res.json();
-    return data.data?.items || [];
+    // All retries exhausted
+    throw lastError || new Error("Birdeye API: max retries exceeded");
   }
 
   private intervalToSeconds(interval: string): number {

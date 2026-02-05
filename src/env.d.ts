@@ -21,6 +21,8 @@ export interface Env {
   LLM_MODEL?: string;
   TWITTER_BEARER_TOKEN?: string;
   DISCORD_WEBHOOK_URL?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
   BIRDEYE_API_KEY?: string;
   MAHORAGA_API_TOKEN: string;
   KILL_SWITCH_SECRET: string;
