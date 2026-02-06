@@ -29,6 +29,13 @@ export interface ChartPattern {
   description: string;
 }
 
+export interface ChartLevels {
+  support: number;
+  resistance: number;
+  distanceFromSupportPct: number;
+  distanceFromResistancePct: number;
+}
+
 export interface ChartAnalysis {
   token: string;
   timeframe: string;
@@ -38,8 +45,14 @@ export interface ChartAnalysis {
     trend: "up" | "down" | "sideways";
     volatility: "low" | "medium" | "high";
     volumeProfile: "accumulation" | "distribution" | "neutral";
+    volumeConfirmation: "confirmed" | "diverging" | "climax";
     recentMomentum: number; // -100 to +100
+    rsi: number; // 0-100
+    rsiCondition: "oversold" | "neutral" | "overbought";
+    momentumQuality: "fresh" | "extended" | "exhausted";
+    breakoutQuality?: "strong" | "weak" | "failed" | "none";
   };
+  levels: ChartLevels;
   entryScore: number; // 0-100, higher = better entry point
   recommendation: "strong_buy" | "buy" | "wait" | "avoid";
 }
@@ -152,7 +165,8 @@ export class BirdeyeProvider {
 
       const patterns = this.detectPatterns(candles);
       const indicators = this.calculateIndicators(candles);
-      const entryScore = this.calculateEntryScore(patterns, indicators, candles);
+      const levels = this.calculateLevels(candles);
+      const entryScore = this.calculateEntryScore(patterns, indicators, candles, levels);
 
       let recommendation: ChartAnalysis["recommendation"];
       if (entryScore >= 70) recommendation = "strong_buy";
@@ -166,6 +180,7 @@ export class BirdeyeProvider {
         candles: candles.length,
         patterns,
         indicators,
+        levels,
         entryScore,
         recommendation,
       };
@@ -316,6 +331,35 @@ export class BirdeyeProvider {
       });
     }
 
+    // 8. Accumulation Breakout (tight consolidation + volume + price breaking out)
+    if (len >= 15 && rangePercent < 8) {
+      // Check if we have 10+ candles in consolidation
+      const consolidationCandles = candles.slice(-15, -3);
+      const consolidationHigh = Math.max(...consolidationCandles.map(c => c.h));
+      const consolidationLow = Math.min(...consolidationCandles.map(c => c.l));
+      const consolidationRange = consolidationHigh > 0
+        ? ((consolidationHigh - consolidationLow) / consolidationHigh) * 100
+        : 100;
+
+      // Check if last 3 candles have increasing volume
+      const last3Volumes = volumes.slice(-3);
+      const volumeIncreasing = last3Volumes.length === 3 &&
+        last3Volumes[1]! > last3Volumes[0]! &&
+        last3Volumes[2]! > last3Volumes[1]!;
+
+      // Check if price is breaking above consolidation
+      const breakingOut = currentPrice > consolidationHigh;
+
+      if (consolidationRange < 15 && volumeIncreasing && breakingOut) {
+        patterns.push({
+          pattern: "accumulation_breakout",
+          confidence: 0.8,
+          signal: "bullish",
+          description: "Breaking out of tight consolidation with increasing volume - high conviction entry",
+        });
+      }
+    }
+
     return patterns;
   }
 
@@ -325,6 +369,7 @@ export class BirdeyeProvider {
   private calculateIndicators(candles: OHLCVCandle[]): ChartAnalysis["indicators"] {
     const closes = candles.map(c => c.c);
     const volumes = candles.map(c => c.v);
+    const highs = candles.map(c => c.h);
     const len = closes.length;
 
     // Trend: Compare recent price to earlier price
@@ -369,13 +414,177 @@ export class BirdeyeProvider {
     else if (volChange > 1.3 && trend === "down") volumeProfile = "distribution";
     else volumeProfile = "neutral";
 
+    // Volume Confirmation: Check if volume confirms price action
+    // Look at last 5 candles - does volume increase on green candles?
+    let volumeConfirmation: "confirmed" | "diverging" | "climax";
+    const recent5 = candles.slice(-5);
+    let greenVolumeSum = 0;
+    let redVolumeSum = 0;
+    let greenCount = 0;
+    let redCount = 0;
+    for (const c of recent5) {
+      if (c.c > c.o) {
+        greenVolumeSum += c.v;
+        greenCount++;
+      } else {
+        redVolumeSum += c.v;
+        redCount++;
+      }
+    }
+    const avgGreenVol = greenCount > 0 ? greenVolumeSum / greenCount : 0;
+    const avgRedVol = redCount > 0 ? redVolumeSum / redCount : 0;
+    const lastCandle = candles[len - 1];
+    const avgVolAll = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+
+    // Climax: extreme volume spike (3x average)
+    if (lastCandle && lastCandle.v > avgVolAll * 3) {
+      volumeConfirmation = "climax";
+    }
+    // Confirmed: volume higher on green candles than red (bullish) OR volume higher on red than green (bearish trend confirmed)
+    else if (trend === "up" && avgGreenVol > avgRedVol * 1.2) {
+      volumeConfirmation = "confirmed";
+    } else if (trend === "down" && avgRedVol > avgGreenVol * 1.2) {
+      volumeConfirmation = "confirmed";
+    }
+    // Diverging: price up but red volume > green volume (weak)
+    else if (trend === "up" && avgRedVol > avgGreenVol) {
+      volumeConfirmation = "diverging";
+    } else if (trend === "down" && avgGreenVol > avgRedVol) {
+      volumeConfirmation = "diverging";
+    } else {
+      volumeConfirmation = "confirmed"; // Neutral case
+    }
+
     // Recent Momentum: Price change over last 5 candles scaled to -100 to +100
     const currentClose = closes[len - 1] ?? 0;
     const olderClose = closes[len - 6] ?? currentClose;
     const momentumPct = olderClose > 0 ? ((currentClose - olderClose) / olderClose) * 100 : 0;
     const recentMomentum = Math.max(-100, Math.min(100, momentumPct * 2));
 
-    return { trend, volatility, volumeProfile, recentMomentum };
+    // RSI Calculation (14-period or available candles)
+    const rsi = this.calculateRSI(closes);
+    let rsiCondition: "oversold" | "neutral" | "overbought";
+    if (rsi < 30) rsiCondition = "oversold";
+    else if (rsi > 70) rsiCondition = "overbought";
+    else rsiCondition = "neutral";
+
+    // Momentum Quality: Is this a fresh move or exhausted?
+    let momentumQuality: "fresh" | "extended" | "exhausted";
+    const momentum5 = len >= 6 ? ((closes[len - 1]! - closes[len - 6]!) / closes[len - 6]!) * 100 : 0;
+    const momentum10 = len >= 11 ? ((closes[len - 1]! - closes[len - 11]!) / closes[len - 11]!) * 100 : 0;
+
+    if (rsi < 50 && momentum5 > 5) {
+      // Starting from low RSI and moving up = fresh
+      momentumQuality = "fresh";
+    } else if (rsi > 65 && momentum5 > 0 && momentum10 > 30) {
+      // High RSI with sustained gains = extended
+      momentumQuality = "extended";
+    } else if (rsi > 60 && momentum5 < momentum10 * 0.3) {
+      // RSI elevated but momentum fading = exhausted
+      momentumQuality = "exhausted";
+    } else if (momentum5 < -5 && trend === "down") {
+      momentumQuality = "exhausted";
+    } else {
+      momentumQuality = "fresh";
+    }
+
+    // Breakout Quality: Did price break resistance with volume?
+    let breakoutQuality: "strong" | "weak" | "failed" | "none" = "none";
+    if (len >= 20) {
+      const resistance = Math.max(...highs.slice(-20, -5)); // Recent resistance (excluding last 5)
+      const currentHigh = highs[len - 1] ?? 0;
+      const prevHigh = highs[len - 2] ?? 0;
+
+      // Check if we broke above resistance
+      if (currentHigh > resistance || prevHigh > resistance) {
+        const breakoutCandles = candles.slice(-3);
+        const breakoutVolume = breakoutCandles.reduce((sum, c) => sum + c.v, 0) / 3;
+        const priorVolume = candles.slice(-10, -3).reduce((sum, c) => sum + c.v, 0) / 7;
+
+        // Strong: broke resistance with 2x+ volume
+        if (breakoutVolume > priorVolume * 2 && currentClose > resistance) {
+          breakoutQuality = "strong";
+        }
+        // Failed: broke but closed back below
+        else if (currentClose < resistance && prevHigh > resistance) {
+          breakoutQuality = "failed";
+        }
+        // Weak: broke but without volume confirmation
+        else if (breakoutVolume < priorVolume * 1.5) {
+          breakoutQuality = "weak";
+        } else {
+          breakoutQuality = "strong";
+        }
+      }
+    }
+
+    return {
+      trend,
+      volatility,
+      volumeProfile,
+      volumeConfirmation,
+      recentMomentum,
+      rsi,
+      rsiCondition,
+      momentumQuality,
+      breakoutQuality,
+    };
+  }
+
+  /**
+   * Calculate RSI (Relative Strength Index)
+   * Uses available candles, ideally 14 periods
+   */
+  private calculateRSI(closes: number[]): number {
+    const period = Math.min(14, closes.length - 1);
+    if (period < 2) return 50; // Not enough data
+
+    let gains = 0;
+    let losses = 0;
+
+    // Calculate initial average gain/loss
+    for (let i = closes.length - period; i < closes.length; i++) {
+      const change = closes[i]! - closes[i - 1]!;
+      if (change > 0) gains += change;
+      else losses += Math.abs(change);
+    }
+
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+
+    if (avgLoss === 0) return 100; // No losses = max RSI
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  }
+
+  /**
+   * Calculate support and resistance levels
+   */
+  private calculateLevels(candles: OHLCVCandle[]): ChartLevels {
+    const len = candles.length;
+    const lookback = Math.min(20, len);
+    const recentCandles = candles.slice(-lookback);
+
+    const lows = recentCandles.map(c => c.l);
+    const highs = recentCandles.map(c => c.h);
+    const currentPrice = candles[len - 1]?.c ?? 0;
+
+    const support = Math.min(...lows);
+    const resistance = Math.max(...highs);
+
+    const distanceFromSupportPct = support > 0
+      ? ((currentPrice - support) / support) * 100
+      : 0;
+    const distanceFromResistancePct = resistance > 0
+      ? ((resistance - currentPrice) / resistance) * 100
+      : 0;
+
+    return {
+      support,
+      resistance,
+      distanceFromSupportPct,
+      distanceFromResistancePct,
+    };
   }
 
   /**
@@ -384,7 +593,8 @@ export class BirdeyeProvider {
   private calculateEntryScore(
     patterns: ChartPattern[],
     indicators: ChartAnalysis["indicators"],
-    candles: OHLCVCandle[]
+    candles: OHLCVCandle[],
+    levels: ChartLevels
   ): number {
     let score = 50; // Start neutral
 
@@ -406,6 +616,31 @@ export class BirdeyeProvider {
 
     if (indicators.volatility === "high") score -= 5; // Slight penalty for high volatility
 
+    // Volume Confirmation contributions
+    if (indicators.volumeConfirmation === "confirmed") score += 10;
+    else if (indicators.volumeConfirmation === "diverging") score -= 15;
+    else if (indicators.volumeConfirmation === "climax") {
+      // Climax can be good or bad depending on candle color
+      const lastCandle = candles[candles.length - 1];
+      if (lastCandle && lastCandle.c < lastCandle.o) {
+        score -= 25; // Red climax = distribution/dump
+      }
+    }
+
+    // RSI contributions
+    if (indicators.rsiCondition === "oversold") score += 15; // Bounce opportunity
+    else if (indicators.rsiCondition === "overbought") score -= 20; // Buying the top
+
+    // Momentum Quality contributions
+    if (indicators.momentumQuality === "fresh") score += 10;
+    else if (indicators.momentumQuality === "exhausted") score -= 15;
+    // "extended" is neutral
+
+    // Breakout Quality contributions
+    if (indicators.breakoutQuality === "strong") score += 20; // High conviction entry
+    else if (indicators.breakoutQuality === "weak") score -= 10;
+    else if (indicators.breakoutQuality === "failed") score -= 25; // Failed breakout = bearish
+
     // Momentum contribution (favor moderate positive momentum, not overextended)
     if (indicators.recentMomentum > 0 && indicators.recentMomentum < 30) {
       score += 10; // Good positive momentum
@@ -415,17 +650,14 @@ export class BirdeyeProvider {
       score -= 10; // Falling knife
     }
 
-    // Check if we're buying near local high
-    const closes = candles.map(c => c.c);
-    const currentPrice = closes[closes.length - 1] ?? 0;
-    const recentCloses = closes.slice(-10);
-    const recentHigh = recentCloses.length > 0 ? Math.max(...recentCloses) : currentPrice;
-    const distanceFromHigh = recentHigh > 0 ? ((recentHigh - currentPrice) / recentHigh) * 100 : 0;
-
-    if (distanceFromHigh < 5) {
-      score -= 15; // Buying very close to recent high
-    } else if (distanceFromHigh > 15 && distanceFromHigh < 40) {
-      score += 10; // Buying a dip
+    // Support/Resistance level contributions
+    if (levels.distanceFromSupportPct < 10) {
+      score += 15; // Near support = good entry
+    }
+    if (levels.distanceFromResistancePct < 5) {
+      score -= 20; // Near resistance = bad entry
+    } else if (levels.distanceFromResistancePct > 15 && levels.distanceFromResistancePct < 40) {
+      score += 10; // Buying a dip with room to run
     }
 
     return Math.max(0, Math.min(100, score));

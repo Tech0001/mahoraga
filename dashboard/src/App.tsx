@@ -1047,6 +1047,21 @@ export default function App() {
                         )}
                       </span>
                     )}
+                    {status?.dexPaperTrading?.circuitBreakerActive && (
+                      <span className="text-hud-error text-xs font-bold animate-pulse">
+                        ⚡ CIRCUIT BREAKER
+                        {status.dexPaperTrading.circuitBreakerUntil && (
+                          <span className="font-normal ml-1">
+                            ({Math.max(0, Math.round((new Date(status.dexPaperTrading.circuitBreakerUntil).getTime() - Date.now()) / 60000))}m)
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {status?.dexPaperTrading?.drawdownPaused && (
+                      <span className="text-hud-error text-xs font-bold">
+                        📉 DRAWDOWN PAUSE
+                      </span>
+                    )}
                     <span>{status?.dexSignals?.length || 0} signals</span>
                   </div>
                 }
@@ -1202,6 +1217,7 @@ export default function App() {
                         <thead className="sticky top-0 bg-hud-bg">
                           <tr className="border-b border-hud-line/50">
                             <th className="hud-label text-left py-2 px-2">Token</th>
+                            <th className="hud-label text-left py-2 px-2">Tier</th>
                             <th className="hud-label text-right py-2 px-2">P&L</th>
                             <th className="hud-label text-right py-2 px-2">Exit Reason</th>
                             <th className="hud-label text-right py-2 px-2">Hold Time</th>
@@ -1220,6 +1236,7 @@ export default function App() {
                             pnlPct: number;
                             pnlSol: number;
                             exitReason: string;
+                            tier?: string;
                           }, idx: number) => {
                             const holdTimeHours = (trade.exitTime - trade.entryTime) / (1000 * 60 * 60);
                             const exitTimeAgo = (Date.now() - trade.exitTime) / (1000 * 60);
@@ -1248,6 +1265,9 @@ export default function App() {
                                 <td className="hud-value-sm py-2 px-2">
                                   <span className="text-hud-warning mr-1">◎</span>
                                   <span className="font-semibold">{trade.symbol}</span>
+                                </td>
+                                <td className="hud-value-sm py-2 px-2 text-hud-text-dim text-[10px] uppercase tracking-wider">
+                                  {trade.tier || '—'}
                                 </td>
                                 <td className={clsx(
                                   'hud-value-sm text-right py-2 px-2 font-semibold',

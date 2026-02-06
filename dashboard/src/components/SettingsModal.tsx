@@ -932,6 +932,154 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 <p className="text-[9px] text-hud-text-dim mt-1">Max drop from peak (e.g., 45% = +155% floor at +200%)</p>
               </div>
 
+              {/* EXIT STRATEGY - Let Runners Run */}
+              <div className="col-span-2 mt-4 pt-4 border-t border-hud-line">
+                <span className="hud-label text-hud-cyan">EXIT STRATEGY</span>
+                <p className="text-[9px] text-hud-text-dim mt-1">Configure how winners exit. "Momentum Break" lets runners run until steam dies.</p>
+              </div>
+
+              {/* Momentum Break - Primary Exit Strategy */}
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.dex_momentum_break_enabled ?? true}
+                    onChange={e => handleChange('dex_momentum_break_enabled', e.target.checked ? 1 : 0)}
+                    disabled={!localConfig.dex_enabled}
+                  />
+                  <span className="hud-label text-hud-success">Momentum Break (Recommended)</span>
+                </label>
+                <p className="text-[9px] text-hud-text-dim mt-1">Exit profitable positions when momentum drops significantly. Lets runners run until steam dies.</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Momentum Drop (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_momentum_break_threshold_pct || 50}
+                  onChange={e => handleChange('dex_momentum_break_threshold_pct', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled || !localConfig.dex_momentum_break_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Exit when momentum drops this % from entry</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Min Profit (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_momentum_break_min_profit_pct || 10}
+                  onChange={e => handleChange('dex_momentum_break_min_profit_pct', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled || !localConfig.dex_momentum_break_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Only trigger if position is at least this % profitable</p>
+              </div>
+
+              {/* Proactive Take Profit - Now Optional */}
+              <div className="col-span-2 mt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.dex_take_profit_enabled || false}
+                    onChange={e => handleChange('dex_take_profit_enabled', e.target.checked ? 1 : 0)}
+                    disabled={!localConfig.dex_enabled}
+                  />
+                  <span className="hud-label text-hud-warning">Proactive Take Profit</span>
+                </label>
+                <p className="text-[9px] text-hud-text-dim mt-1">Exit immediately at fixed % target. Cuts runners short but locks in gains. OFF by default.</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Target (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_take_profit_pct || 40}
+                  onChange={e => handleChange('dex_take_profit_pct', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled || !localConfig.dex_take_profit_enabled}
+                />
+              </div>
+
+              {/* Time-Based Exit - Stagnation Safety */}
+              <div className="col-span-2 mt-2">
+                <span className="hud-label text-hud-text-dim">Time-Based Exit (Stagnation Safety)</span>
+                <p className="text-[9px] text-hud-text-dim mt-1">Exit profitable positions that have been held too long without significant movement.</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Hold Hours</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_time_based_hold_hours || 2}
+                  onChange={e => handleChange('dex_time_based_hold_hours', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Take profit after holding this long</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Min Profit (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_time_based_profit_pct || 15}
+                  onChange={e => handleChange('dex_time_based_profit_pct', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Only if position has at least this % gain</p>
+              </div>
+
+              {/* Per-Tier Trailing Activation */}
+              <div className="col-span-2 mt-4 pt-4 border-t border-hud-line">
+                <span className="hud-label text-hud-purple">TRAILING STOP ACTIVATION (Per Tier)</span>
+                <p className="text-[9px] text-hud-text-dim mt-1">When trailing stop activates for each tier. Lower = earlier protection. Higher = more room to run.</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Lottery (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_lottery_trailing_activation || 30}
+                  onChange={e => handleChange('dex_lottery_trailing_activation', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+                <p className="text-[9px] text-hud-text-dim mt-1">Was 100%, now 30% for earlier protection</p>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Breakout (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_breakout_trailing_activation || 25}
+                  onChange={e => handleChange('dex_breakout_trailing_activation', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Microspray (%)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.dex_microspray_trailing_activation || 20}
+                  onChange={e => handleChange('dex_microspray_trailing_activation', Number(e.target.value))}
+                  disabled={!localConfig.dex_enabled}
+                />
+              </div>
+
+              {/* Cooldown Behavior */}
+              <div className="col-span-2 mt-4 pt-4 border-t border-hud-line">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.dex_cooldown_fail_closed ?? true}
+                    onChange={e => handleChange('dex_cooldown_fail_closed', e.target.checked ? 1 : 0)}
+                    disabled={!localConfig.dex_enabled}
+                  />
+                  <span className="hud-label text-hud-error">Fail-Closed Cooldowns</span>
+                </label>
+                <p className="text-[9px] text-hud-text-dim mt-1">Block re-entry when chart analysis fails (API errors). Prevents buying dead cat bounces.</p>
+              </div>
+
               <div className="col-span-2 mt-4 p-2 bg-hud-bg-dark rounded border border-hud-line">
                 <p className="text-[9px] text-hud-warning">⚠️ Paper trading only. Solana wallet integration coming soon.</p>
               </div>

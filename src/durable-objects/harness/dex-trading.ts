@@ -14,6 +14,7 @@ import {
   getSolPriceUsd,
 } from "./utils";
 import { createBirdeyeProvider } from "../../providers/birdeye";
+import { getJupiterPrices } from "../../providers/jupiter";
 
 /**
  * Run DEX momentum trading logic with PAPER TRADING.
@@ -48,20 +49,52 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
 
   const heldTokens = new Set(Object.keys(ctx.state.dexPositions));
 
+  // Jupiter Price API - batch fetch real-time prices for open positions
+  // Requires JUPITER_API_KEY in env. When configured, provides sub-second pricing.
+  // Without it, falls back to DexScreener signal prices + lastKnownPrice cache.
+  const positionAddresses = Object.keys(ctx.state.dexPositions);
+  let jupiterPrices = new Map<string, number>();
+  const jupiterApiKey = ctx.env.JUPITER_API_KEY;
+  if (positionAddresses.length > 0 && jupiterApiKey) {
+    try {
+      jupiterPrices = await getJupiterPrices(positionAddresses, jupiterApiKey);
+      if (jupiterPrices.size > 0) {
+        ctx.log("DexMomentum", "jupiter_prices", {
+          positionCount: positionAddresses.length,
+          pricesReceived: jupiterPrices.size,
+          missing: positionAddresses.filter(addr => !jupiterPrices.has(addr)).map(addr =>
+            ctx.state.dexPositions[addr]?.symbol || addr.slice(0, 8)
+          ),
+        });
+      }
+    } catch (e) {
+      ctx.log("DexMomentum", "jupiter_prices_error", { error: String(e) });
+    }
+  }
+
   // Check exits for existing positions
   for (const [tokenAddress, position] of Object.entries(ctx.state.dexPositions)) {
     const signal = ctx.state.dexSignals.find(s => s.tokenAddress === tokenAddress);
 
     // Calculate P&L based on current price vs entry
-    // Use signal price if available, else last known price, else entry price (worst case)
+    // Priority: Jupiter (real-time) > DexScreener signal > cached price > entry price
     let currentPrice: number;
-    if (signal?.priceUsd) {
+    let priceSource: string;
+    const jupiterPrice = jupiterPrices.get(tokenAddress);
+    if (jupiterPrice && jupiterPrice > 0) {
+      currentPrice = jupiterPrice;
+      priceSource = "jupiter";
+      position.lastKnownPrice = currentPrice;
+    } else if (signal?.priceUsd) {
       currentPrice = signal.priceUsd;
-      position.lastKnownPrice = currentPrice; // Cache for when signal goes missing
+      priceSource = "dexscreener";
+      position.lastKnownPrice = currentPrice;
     } else if (position.lastKnownPrice) {
-      currentPrice = position.lastKnownPrice; // Use cached price when signal missing
+      currentPrice = position.lastKnownPrice;
+      priceSource = "cached";
     } else {
-      currentPrice = position.entryPrice; // Fallback only if we never had a price
+      currentPrice = position.entryPrice;
+      priceSource = "entry_fallback";
     }
     const plPct = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
 
@@ -80,60 +113,101 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     const minLiquidityRatio = 5; // Position should be at most 20% of liquidity for safe exit
     const canSafelyExit = currentLiquidity >= positionValueUsd * minLiquidityRatio;
 
-    // Lost momentum - token fell off radar
-    // KEY FIX: If position is GREEN, don't exit! Let trailing stop handle it.
-    // Only exit on lost momentum if we're RED and it's been missing for a while.
-    // NOTE: Signal should never be missing for open positions - gatherers.ts preserves them
+    // Lost momentum - token fell off DexScreener trending
+    // If it's not a candidate anymore, we wouldn't enter it now, so close it.
+    // One scan grace period (30s) to handle transient API hiccups.
     if (!signal) {
-      // Increment missed scan counter
       position.missedScans = (position.missedScans || 0) + 1;
 
-      // If position is profitable, DON'T exit just because it's not trending
-      // The trailing stop will protect gains - no need to panic sell a winner
-      if (plPct > 0) {
-        ctx.log("DexMomentum", "signal_miss_but_green", {
+      if (position.missedScans >= 2) {
+        shouldExit = true;
+        exitReason = "lost_momentum";
+        ctx.log("DexMomentum", "lost_momentum_exit", {
           symbol: position.symbol,
           missedScans: position.missedScans,
           plPct: plPct.toFixed(1) + "%",
-          reason: "Position is profitable - letting trailing stop manage exit, not panic selling",
+          priceSource,
+          reason: "Token fell off trending - no longer a candidate",
         });
-        // Don't exit - trailing stop will handle it if price drops
-      }
-      // If position is RED and missing for extended period (10+ scans = 5 min), consider exit
-      else if (position.missedScans >= 10) { // Keep 10 scans (~5 min) to allow consolidation
-        if (canSafelyExit) {
-          shouldExit = true;
-          exitReason = "lost_momentum";
-          ctx.log("DexMomentum", "lost_momentum_exit", {
-            symbol: position.symbol,
-            missedScans: position.missedScans,
-            plPct: plPct.toFixed(1) + "%",
-            reason: "Position is RED and token missing from signals for 5+ minutes",
-          });
-        } else {
-          ctx.log("DexMomentum", "exit_blocked_low_liquidity", {
-            symbol: position.symbol,
-            reason: "Token lost momentum but liquidity too low for safe exit",
-            positionValueUsd: positionValueUsd.toFixed(2),
-            estimatedLiquidity: currentLiquidity.toFixed(2),
-          });
-        }
       } else {
         ctx.log("DexMomentum", "signal_miss_grace", {
           symbol: position.symbol,
           missedScans: position.missedScans,
           plPct: plPct.toFixed(1) + "%",
-          gracePeriod: plPct > 0 ? "GREEN position - trailing stop will manage" : "Waiting 10 scans (5 min) before exit",
+          priceSource,
         });
       }
     } else {
       // Reset missed scan counter when signal is found
       position.missedScans = 0;
 
+      // ========== PROACTIVE TAKE PROFIT - DISABLED BY DEFAULT (Let Runners Run) ==========
+      // FIX #1: Changed default to FALSE - use momentum break detection instead
+      // This is now a safety net only, not the primary exit strategy
+      const takeProfitEnabled = ctx.state.config.dex_take_profit_enabled === true; // Default: FALSE (let runners run)
+      const takeProfitPct = ctx.state.config.dex_take_profit_pct ?? 40;
+
+      if (takeProfitEnabled && plPct >= takeProfitPct) {
+        shouldExit = true;
+        exitReason = "take_profit";
+        ctx.log("DexMomentum", "take_profit_triggered", {
+          symbol: position.symbol,
+          plPct: plPct.toFixed(1) + "%",
+          target: takeProfitPct + "%",
+          tier: position.tier,
+          reason: "Target profit reached - locking in gains (proactive mode enabled)",
+        });
+      }
+
+      // ========== TIME-BASED PROFIT TAKING - Don't let winners become losers ==========
+      // For positions that have been profitable for extended periods, take profits
+      if (!shouldExit && takeProfitEnabled) {
+        const holdingHours = (Date.now() - position.entryTime) / (1000 * 60 * 60);
+        const minProfitForTimeExit = ctx.state.config.dex_time_based_profit_pct ?? 15;
+        const maxHoldHours = ctx.state.config.dex_time_based_hold_hours ?? 2;
+
+        if (plPct >= minProfitForTimeExit && holdingHours >= maxHoldHours) {
+          shouldExit = true;
+          exitReason = "take_profit";
+          ctx.log("DexMomentum", "time_based_take_profit", {
+            symbol: position.symbol,
+            plPct: plPct.toFixed(1) + "%",
+            holdingHours: holdingHours.toFixed(1),
+            minProfit: minProfitForTimeExit + "%",
+            maxHoldHours,
+            reason: "Profitable position held long enough - taking profits",
+          });
+        }
+      }
+
+      // ========== MOMENTUM BREAK - Exit Profitable Positions When Steam Runs Out (FIX #5) ==========
+      // This is the KEY FIX for "let runners run" - we don't exit at arbitrary price targets
+      // Instead we exit when momentum shows the run is over
+      const momentumBreakEnabled = ctx.state.config.dex_momentum_break_enabled !== false; // Default: true
+      const momentumBreakThreshold = ctx.state.config.dex_momentum_break_threshold_pct ?? 50;
+      const momentumBreakMinProfit = ctx.state.config.dex_momentum_break_min_profit_pct ?? 10;
+
+      if (!shouldExit && momentumBreakEnabled && plPct >= momentumBreakMinProfit) {
+        const momentumDecay = ((position.entryMomentumScore - signal.momentumScore) / position.entryMomentumScore) * 100;
+        if (momentumDecay >= momentumBreakThreshold) {
+          shouldExit = true;
+          exitReason = "take_profit";
+          ctx.log("DexMomentum", "momentum_break_profit", {
+            symbol: position.symbol,
+            plPct: plPct.toFixed(1) + "%",
+            entryMomentum: position.entryMomentumScore.toFixed(1),
+            currentMomentum: signal.momentumScore.toFixed(1),
+            decay: momentumDecay.toFixed(1) + "%",
+            threshold: momentumBreakThreshold + "%",
+            reason: "Steam ran out - taking profits before reversal",
+          });
+        }
+      }
+
       // Task #12: Momentum score decay - exit if score dropped significantly
       // KEY FIX: Only exit on momentum decay if position is RED
-      // If we're green, the trailing stop will handle it
-      if (signal.momentumScore < position.entryMomentumScore * 0.4 && plPct < 0) {
+      // GREEN positions are handled by momentum_break above
+      if (!shouldExit && signal.momentumScore < position.entryMomentumScore * 0.4 && plPct < 0) {
         // Momentum dropped to less than 40% of entry score AND we're losing money
         if (canSafelyExit) {
           shouldExit = true;
@@ -147,8 +221,8 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
             reason: "Momentum decayed AND position is RED",
           });
         }
-      } else if (signal.momentumScore < position.entryMomentumScore * 0.4) {
-        // Momentum decayed but we're green - log but don't exit
+      } else if (!shouldExit && signal.momentumScore < position.entryMomentumScore * 0.4) {
+        // Momentum decayed but we're green and momentum_break didn't trigger - log but don't exit
         ctx.log("DexMomentum", "momentum_decay_but_green", {
           symbol: position.symbol,
           entryMomentumScore: position.entryMomentumScore.toFixed(1),
@@ -157,6 +231,13 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
           reason: "Momentum decayed but position is GREEN - letting trailing stop manage",
         });
       }
+
+      // Chart-based exit checks (distribution and resistance) - DISABLED
+      // These Birdeye API calls were adding 2.5+ seconds per position per scan,
+      // causing scan cycles to take 45+ seconds instead of 30 seconds.
+      // This made the system too slow to react to volatile memecoin price swings.
+      // The momentum_break exit strategy now handles profit-taking without API calls.
+
       // Scaling Trailing Stop - earlier activation with proportional protection
       // Activates at +10%, allows drawdown from breakeven up to 45% max
       else if (ctx.state.config.dex_scaling_trailing_enabled) {
@@ -166,12 +247,29 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         const peakWasMeaningful = position.peakPrice > position.entryPrice * 1.05;
 
         if (peakGainPct >= scalingActivation && peakWasMeaningful) {
-          // Drawdown allowed: scales from peakGain% (at activation) up to max
-          // At +15%: can drop 15% (to breakeven)
-          // At +100%: can drop 45% (to +55%)
-          // At +200%: can drop 45% (to +155%)
-          const drawdownAllowed = Math.min(peakGainPct, maxDrawdownPct);
-          const profitFloorPct = peakGainPct - drawdownAllowed;
+          // PROTECTION 2: Peak Profit Trailing - protect actual gains, not just breakeven
+          // For bigger winners, protect a percentage of the peak gains
+          // - Small gains (+10-25%): standard (can drop to breakeven)
+          // - Medium gains (+25-50%): protect 25% of peak (at +40%, floor is +10%)
+          // - Large gains (+50%+): protect 50% of peak (at +80%, floor is +40%)
+          let profitFloorPct: number;
+
+          const peakFloorPct = ctx.state.config.dex_peak_profit_floor_pct ?? 50;
+
+          if (peakGainPct >= 50) {
+            // Big winner - protect 50% of gains
+            profitFloorPct = peakGainPct * (peakFloorPct / 100);
+          } else if (peakGainPct >= 25) {
+            // Medium winner - protect 25% of gains
+            profitFloorPct = peakGainPct * 0.25;
+          } else {
+            // Small winner - can drop to breakeven
+            profitFloorPct = 0;
+          }
+
+          // Also respect max drawdown limit
+          const drawdownAllowed = Math.min(peakGainPct - profitFloorPct, maxDrawdownPct);
+          profitFloorPct = Math.max(profitFloorPct, peakGainPct - drawdownAllowed);
           const profitFloorPrice = position.entryPrice * (1 + profitFloorPct / 100);
 
           if (currentPrice <= profitFloorPrice) {
@@ -240,14 +338,28 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       else if (ctx.state.config.dex_trailing_stop_enabled) {
         const peakGainPct = ((position.peakPrice - position.entryPrice) / position.entryPrice) * 100;
 
-        // Micro-spray, breakout, and lottery have aggressive trailing stops
+        // FIX #2: Lower activation thresholds for high-risk tiers to enable earlier protection
+        // Previously lottery was 100% which left +0% to +100% with only fixed stop loss
+        // Now: lottery=30%, breakout=25%, microspray=20%
+        let activationPct: number;
+        if (position.tier === 'lottery') {
+          activationPct = ctx.state.config.dex_lottery_trailing_activation ?? 30; // Was 100, now 30
+        } else if (position.tier === 'breakout') {
+          activationPct = ctx.state.config.dex_breakout_trailing_activation ?? 25; // New: 25%
+        } else if (position.tier === 'microspray') {
+          activationPct = ctx.state.config.dex_microspray_trailing_activation ?? 20; // New: 20%
+        } else {
+          activationPct = ctx.state.config.dex_trailing_stop_activation_pct ?? 50;
+        }
         const isHighRiskTier = position.tier === 'microspray' || position.tier === 'breakout' || position.tier === 'lottery';
-        const activationPct = isHighRiskTier
-          ? (ctx.state.config.dex_lottery_trailing_activation ?? 100) // All high-risk tiers use same activation
-          : (ctx.state.config.dex_trailing_stop_activation_pct ?? 50);
-        const distancePct = isHighRiskTier
+        let baseDistancePct = isHighRiskTier
           ? 20 // High-risk tiers: tighter trailing stop (20% from peak)
           : (ctx.state.config.dex_trailing_stop_distance_pct ?? 25);
+
+        // Dynamic trailing stop adjustment via Birdeye - DISABLED
+        // This was adding 2.5+ seconds per position per scan, slowing down exit detection.
+        // Using fixed distance based on tier instead.
+        const distancePct = baseDistancePct;
 
         // Check if trailing stop is activated (position reached activation threshold at some point)
         // FIX: Also verify peak was meaningfully above entry (not just tracking artifact)
@@ -377,16 +489,52 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     } // End of else block (signal found)
 
     if (shouldExit) {
-      // Record stop loss cooldown (#8) for stop_loss, trailing_stop, and scaling_trailing exits
-      // Store exit price for price-based re-entry logic (use currentPrice before slippage)
-      if (exitReason === "stop_loss" || exitReason === "trailing_stop" || exitReason === "scaling_trailing") {
-        if (!ctx.state.dexStopLossCooldowns) ctx.state.dexStopLossCooldowns = {};
+      // Record cooldown for EVERY exit. No position should immediately re-enter —
+      // if the token is genuinely good again it'll re-appear in discovery after the cooldown.
+      // Losing exits get longer cooldowns and increment loss counters.
+      const plBeforeSlippage = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
+      const isLosingExit = exitReason === "stop_loss" || plBeforeSlippage < 0;
+
+      if (!ctx.state.dexStopLossCooldowns) ctx.state.dexStopLossCooldowns = {};
+      const existingCooldown = ctx.state.dexStopLossCooldowns[tokenAddress];
+
+      if (isLosingExit) {
+        // Losing exit: long cooldown + increment loss counters
         const cooldownHours = ctx.state.config.dex_stop_loss_cooldown_hours ?? 2;
+        const consecutiveLosses = (existingCooldown?.consecutiveLosses ?? 0) + 1;
+        const totalLosses = (existingCooldown?.totalLosses ?? 0) + 1;
         ctx.state.dexStopLossCooldowns[tokenAddress] = {
           exitPrice: currentPrice,
           exitTime: Date.now(),
           fallbackExpiry: Date.now() + (cooldownHours * 60 * 60 * 1000),
+          consecutiveLosses,
+          totalLosses,
         };
+        ctx.log("DexMomentum", "cooldown_recorded", {
+          symbol: position.symbol,
+          type: "losing",
+          consecutiveLosses,
+          totalLosses,
+          exitReason,
+          plPct: plBeforeSlippage.toFixed(1) + "%",
+          cooldownHours,
+        });
+      } else {
+        // Profitable exit: 30-min cooldown, don't increment loss counters
+        ctx.state.dexStopLossCooldowns[tokenAddress] = {
+          exitPrice: currentPrice,
+          exitTime: Date.now(),
+          fallbackExpiry: Date.now() + (30 * 60 * 1000), // 30 minutes
+          consecutiveLosses: existingCooldown?.consecutiveLosses ?? 0,
+          totalLosses: existingCooldown?.totalLosses ?? 0,
+        };
+        ctx.log("DexMomentum", "cooldown_recorded", {
+          symbol: position.symbol,
+          type: "profitable",
+          exitReason,
+          plPct: plBeforeSlippage.toFixed(1) + "%",
+          cooldownMinutes: 30,
+        });
       }
 
       // Apply slippage to exit price (selling pushes price down = worse exit)
@@ -417,6 +565,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         pnlPct: actualPlPct,
         pnlSol,
         exitReason,
+        tier: position.tier,
       };
 
       ctx.state.dexTradeHistory.push(tradeRecord);
@@ -470,6 +619,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       ctx.log("DexMomentum", "paper_sell", {
         symbol: position.symbol,
         exitReason,
+        priceSource,
         entryPrice: "$" + position.entryPrice.toFixed(6),
         displayPrice: "$" + currentPrice.toFixed(6),
         exitPrice: "$" + exitPriceWithSlippage.toFixed(6),
@@ -578,14 +728,21 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
   }
 
   // Clean up old cooldowns (#8) - remove entries older than 24 hours to prevent memory bloat
+  // Also reset consecutive loss counters after 24 hours
   if (ctx.state.dexStopLossCooldowns) {
     const now = Date.now();
     const maxCooldownAge = 24 * 60 * 60 * 1000; // 24 hours
     for (const [tokenAddr, cooldown] of Object.entries(ctx.state.dexStopLossCooldowns)) {
       // Handle both old format (number) and new format (object)
-      const exitTime = typeof cooldown === 'number' ? cooldown : cooldown.exitTime;
-      if (now - exitTime > maxCooldownAge) {
-        delete ctx.state.dexStopLossCooldowns[tokenAddr];
+      if (typeof cooldown === 'number') {
+        // Migrate old format to new format
+        if (now - cooldown > maxCooldownAge) {
+          delete ctx.state.dexStopLossCooldowns[tokenAddr];
+        }
+      } else {
+        if (now - cooldown.exitTime > maxCooldownAge) {
+          delete ctx.state.dexStopLossCooldowns[tokenAddr];
+        }
       }
     }
   }
@@ -615,13 +772,24 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       }
       return false;
     } catch (e) {
-      // Chart analysis failed - allow re-entry (don't block on API errors)
-      ctx.log("DexMomentum", "reentry_chart_check_failed", {
-        symbol: s.symbol,
-        error: String(e),
-        action: "Allowing re-entry despite chart check failure",
-      });
-      return false;
+      // FIX #7: Fail closed - block re-entry when chart analysis fails
+      // Better to miss an opportunity than to buy a dead cat bounce
+      const failClosed = ctx.state.config.dex_cooldown_fail_closed !== false; // Default: true
+      if (failClosed) {
+        ctx.log("DexMomentum", "reentry_blocked_chart_error", {
+          symbol: s.symbol,
+          error: String(e),
+          action: "Blocking re-entry due to chart check failure (fail-closed mode)",
+        });
+        return true; // Block re-entry on error
+      } else {
+        ctx.log("DexMomentum", "reentry_allowed_chart_error", {
+          symbol: s.symbol,
+          error: String(e),
+          action: "Allowing re-entry despite chart check failure (fail-open mode)",
+        });
+        return false;
+      }
     }
   };
 
@@ -642,17 +810,28 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       return Date.now() >= cooldown ? s : null;
     }
 
+    // Ensure consecutiveLosses exists (migration for older cooldown entries)
+    if (cooldown.consecutiveLosses === undefined) {
+      cooldown.consecutiveLosses = 1;
+    }
+
     const recoveryPct = ctx.state.config.dex_reentry_recovery_pct ?? 15;
     const minMomentum = ctx.state.config.dex_reentry_min_momentum ?? 70;
 
-    // Check if price has recovered X% above exit price
+    // MINIMUM TIME GATE: No re-entry within 30 minutes regardless of any other condition.
+    // This prevents stale DexScreener signal prices from faking a "recovery" seconds after a stop loss.
+    const minCooldownMs = (ctx.state.config.dex_min_cooldown_minutes ?? 30) * 60 * 1000;
+    const timeSinceExit = Date.now() - cooldown.exitTime;
+    if (timeSinceExit < minCooldownMs) {
+      return null;
+    }
+
+    // Check if price has recovered X% above exit price (only after min cooldown)
     const priceRecoveryThreshold = cooldown.exitPrice * (1 + recoveryPct / 100);
     if (s.priceUsd >= priceRecoveryThreshold) {
-      // FIX 2: Before allowing re-entry on price recovery, verify with chart analysis
-      // This prevents buying dead cat bounces
       const isDeadCat = await isDeadCatBounce(s);
       if (isDeadCat) {
-        return null; // Block re-entry - dead cat bounce detected
+        return null;
       }
 
       ctx.log("DexMomentum", "cooldown_cleared_price_recovery", {
@@ -660,22 +839,54 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         exitPrice: cooldown.exitPrice.toFixed(6),
         currentPrice: s.priceUsd.toFixed(6),
         recoveryPct: (((s.priceUsd - cooldown.exitPrice) / cooldown.exitPrice) * 100).toFixed(1) + "%",
+        minutesSinceExit: Math.round(timeSinceExit / 60000),
         chartVerified: reentryBirdeye ? "yes" : "skipped",
       });
       delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
       return s;
     }
 
-    // Allow re-entry if momentum score is very strong AND minimum time has passed
-    // This prevents immediate re-entry on dead cat bounces
-    const minCooldownMs = 5 * 60 * 1000; // 5 minutes minimum after any stop loss
-    const timeSinceExit = Date.now() - cooldown.exitTime;
+    // ========== CONSECUTIVE LOSS PROTECTION ==========
+    // Block re-entry if token has lost too many times consecutively
+    const maxConsecutiveLosses = ctx.state.config.dex_max_consecutive_losses ?? 2;
+    if (cooldown.consecutiveLosses >= maxConsecutiveLosses) {
+      ctx.log("DexMomentum", "cooldown_blocked_consecutive_losses", {
+        symbol: s.symbol,
+        consecutiveLosses: cooldown.consecutiveLosses,
+        maxAllowed: maxConsecutiveLosses,
+        reason: "Token has lost too many times consecutively - blocked until time expires",
+      });
+      // Only allow re-entry after full cooldown expires
+      if (Date.now() >= cooldown.fallbackExpiry) {
+        ctx.log("DexMomentum", "cooldown_cleared_after_losses", {
+          symbol: s.symbol,
+          consecutiveLosses: cooldown.consecutiveLosses,
+          reason: "Full cooldown expired - resetting consecutive loss counter",
+        });
+        delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
+        return s;
+      }
+      return null;
+    }
 
-    if (s.momentumScore >= minMomentum && timeSinceExit >= minCooldownMs) {
-      // FIX 2: Also verify high-momentum re-entries with chart analysis
+    // ========== TOTAL LOSS PROTECTION (FIX #6) ==========
+    // Block re-entry if token has lost 3+ times in the 24-hour window (totalLosses doesn't reset after 2 hours)
+    const maxTotalLosses = 3;
+    if ((cooldown.totalLosses ?? 0) >= maxTotalLosses) {
+      ctx.log("DexMomentum", "cooldown_blocked_total_losses", {
+        symbol: s.symbol,
+        totalLosses: cooldown.totalLosses,
+        maxAllowed: maxTotalLosses,
+        reason: "Token has lost too many times in 24h window - blocked until 24h cleanup",
+      });
+      return null;
+    }
+
+    // Allow re-entry if momentum score is very strong (min time already checked above)
+    if (s.momentumScore >= minMomentum) {
       const isDeadCat = await isDeadCatBounce(s);
       if (isDeadCat) {
-        return null; // Block re-entry - dead cat bounce detected
+        return null;
       }
 
       ctx.log("DexMomentum", "cooldown_cleared_high_momentum", {
@@ -687,20 +898,26 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       });
       delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
       return s;
-    } else if (s.momentumScore >= minMomentum && timeSinceExit < minCooldownMs) {
-      ctx.log("DexMomentum", "cooldown_waiting_min_time", {
-        symbol: s.symbol,
-        momentumScore: s.momentumScore.toFixed(1),
-        minutesSinceExit: Math.round(timeSinceExit / 60000),
-        minMinutesRequired: 5,
-      });
-      return null;
     }
 
     // Fallback: allow re-entry after time expires
+    // FIX #3: Add dead cat bounce check before time expiry re-entry
     if (Date.now() >= cooldown.fallbackExpiry) {
+      // If we had multiple losses, verify with chart analysis before re-entry
+      if (cooldown.totalLosses >= 2) {
+        const isDeadCat = await isDeadCatBounce(s);
+        if (isDeadCat) {
+          ctx.log("DexMomentum", "cooldown_blocked_after_expiry_dead_cat", {
+            symbol: s.symbol,
+            totalLosses: cooldown.totalLosses,
+            reason: "Time expired but chart shows dead cat bounce - blocking re-entry",
+          });
+          return null;
+        }
+      }
       ctx.log("DexMomentum", "cooldown_cleared_time_expired", {
         symbol: s.symbol,
+        chartVerified: cooldown.totalLosses >= 2 ? "yes" : "skipped",
       });
       delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
       return s;
@@ -781,6 +998,15 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
             recommendation: chartAnalysis.recommendation,
             trend: chartAnalysis.indicators.trend,
             volumeProfile: chartAnalysis.indicators.volumeProfile,
+            volumeConfirmation: chartAnalysis.indicators.volumeConfirmation,
+            rsi: chartAnalysis.indicators.rsi?.toFixed(1),
+            rsiCondition: chartAnalysis.indicators.rsiCondition,
+            momentumQuality: chartAnalysis.indicators.momentumQuality,
+            breakoutQuality: chartAnalysis.indicators.breakoutQuality,
+            support: chartAnalysis.levels?.support?.toFixed(8),
+            resistance: chartAnalysis.levels?.resistance?.toFixed(8),
+            distFromSupport: chartAnalysis.levels?.distanceFromSupportPct?.toFixed(1) + "%",
+            distFromResistance: chartAnalysis.levels?.distanceFromResistancePct?.toFixed(1) + "%",
             patterns: chartAnalysis.patterns.map(p => p.pattern).join(", ") || "none",
           });
 
@@ -914,6 +1140,16 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
 
     // Token amount is based on slipped price (fewer tokens due to slippage)
     const tokenAmount = usdAmount / entryPriceWithSlippage;
+
+    // Final duplicate check - prevent race condition where multiple candidates
+    // for the same token pass initial filter in the same cycle
+    if (ctx.state.dexPositions[candidate.tokenAddress]) {
+      ctx.log("DexMomentum", "skip_duplicate_position", {
+        symbol: candidate.symbol,
+        reason: "Position already exists (race condition prevented)",
+      });
+      continue;
+    }
 
     // Create paper position
     const position: DexPosition = {

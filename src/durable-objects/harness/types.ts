@@ -178,6 +178,7 @@ export interface AgentConfig {
   dex_max_positions: number; // [TUNE] Max concurrent DEX positions
   dex_slippage_model: "none" | "conservative" | "realistic"; // [TUNE] Slippage simulation model
   dex_gas_fee_sol: number; // [TUNE] Simulated gas fee per trade in SOL (default: 0.005)
+  dex_scan_interval_ms?: number; // [TUNE] How often to run DexScreener discovery scan (default: 60000 = 60s)
 
   // Circuit breaker - pause trading after multiple stop losses
   dex_circuit_breaker_losses: number; // [TUNE] Number of stop losses to trigger circuit breaker
@@ -195,6 +196,25 @@ export interface AgentConfig {
   dex_reentry_recovery_pct: number; // [TUNE] Allow re-entry when price is X% above exit price
   dex_reentry_min_momentum: number; // [TUNE] OR allow re-entry when momentum score exceeds this
   dex_breaker_min_cooldown_minutes: number; // [TUNE] Minimum pause before circuit breaker can clear
+  dex_min_cooldown_minutes?: number; // [TUNE] Minimum cooldown even for high momentum tokens (default: 30)
+  dex_max_consecutive_losses?: number; // [TUNE] Block re-entry after this many consecutive losses (default: 2)
+
+  // Proactive take profit - lock in gains at target levels
+  dex_take_profit_enabled?: boolean; // [TOGGLE] Enable proactive take profit (default: FALSE - let runners run)
+  dex_time_based_profit_pct?: number; // [TUNE] Min profit % for time-based exit (default: 15)
+  dex_time_based_hold_hours?: number; // [TUNE] Hours before time-based profit taking (default: 2)
+
+  // Momentum break - exit profitable positions when momentum dies (let runners run philosophy)
+  dex_momentum_break_enabled?: boolean; // [TOGGLE] Exit winners when momentum dies (default: true)
+  dex_momentum_break_threshold_pct?: number; // [TUNE] Momentum drop % to trigger exit (default: 50)
+  dex_momentum_break_min_profit_pct?: number; // [TUNE] Min profit to take on momentum break (default: 10)
+
+  // Cooldown behavior on API errors
+  dex_cooldown_fail_closed?: boolean; // [TOGGLE] Block re-entry on API errors (default: true)
+
+  // Lower trailing activation thresholds for high-risk tiers
+  dex_breakout_trailing_activation?: number; // [TUNE] Trailing activation for breakout tier (default: 25)
+  dex_microspray_trailing_activation?: number; // [TUNE] Trailing activation for microspray tier (default: 20)
 
   // Trailing stop loss - lock in gains by trailing the peak price
   dex_trailing_stop_enabled: boolean; // [TOGGLE] Enable trailing stop loss for DEX positions
@@ -210,6 +230,22 @@ export interface AgentConfig {
   // Chart pattern analysis - use Birdeye OHLCV data to avoid buying tops
   dex_chart_analysis_enabled: boolean; // [TOGGLE] Enable chart pattern analysis before entry
   dex_chart_min_entry_score: number; // [TUNE] Minimum entry score (0-100) to enter position
+
+  // Chart-based exit enhancements
+  dex_exit_on_distribution?: boolean; // [TOGGLE] Exit winners when distribution detected (default: true)
+  dex_distribution_min_profit_pct?: number; // [TUNE] Min profit % to trigger distribution exit (default: 15)
+  dex_exit_at_resistance?: boolean; // [TOGGLE] Exit at resistance with weak volume (default: true)
+  dex_resistance_buffer_pct?: number; // [TUNE] How close to resistance to trigger exit (default: 3)
+
+  // Dynamic trailing stop - adjust distance based on chart analysis
+  dex_dynamic_trailing_enabled?: boolean; // [TOGGLE] Enable dynamic trailing stop adjustments (default: true)
+  dex_trailing_uptrend_multiplier?: number; // [TUNE] Multiply trailing distance in uptrend (default: 1.2)
+  dex_trailing_downtrend_multiplier?: number; // [TUNE] Multiply trailing distance in downtrend (default: 0.5)
+
+  // Stale winner protection - exit profitable positions when momentum dies
+  dex_stale_winner_profit_pct?: number; // [TUNE] Min profit % to trigger stale winner exit (default: 10)
+  dex_stale_winner_scans?: number; // [TUNE] Missed scans before stale winner exit (default: 3)
+  dex_peak_profit_floor_pct?: number; // [TUNE] Protect this % of peak gains for big winners (default: 50)
 
   // Crisis Mode - Black Swan Protection System
   crisis_mode_enabled: boolean; // [TOGGLE] Enable crisis detection and auto-protection
@@ -383,7 +419,11 @@ export interface DexTradeRecord {
     | "manual"
     | "trailing_stop"
     | "breakeven_stop"
-    | "scaling_trailing";
+    | "scaling_trailing"
+    | "distribution_exit"
+    | "resistance_exit"
+    | "liquidity_exit";
+  tier?: "microspray" | "breakout" | "lottery" | "early" | "established";
 }
 
 export interface DexTradingMetrics {
@@ -446,10 +486,10 @@ export interface AgentState {
   // Drawdown protection state (#11)
   dexPeakValue: number; // High water mark for drawdown calculation (total portfolio value)
   dexDrawdownPaused: boolean;
-  // Stop loss cooldown tracking (#8) - price-based re-entry
+  // Stop loss cooldown tracking (#8) - price-based re-entry with consecutive loss tracking
   dexStopLossCooldowns: Record<
     string,
-    { exitPrice: number; exitTime: number; fallbackExpiry: number }
+    { exitPrice: number; exitTime: number; fallbackExpiry: number; consecutiveLosses: number; totalLosses: number }
   >;
   // Crisis Mode state
   crisisState: CrisisState;

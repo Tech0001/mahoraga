@@ -162,6 +162,25 @@ export interface Config {
   dex_reentry_recovery_pct?: number
   dex_reentry_min_momentum?: number
   dex_breaker_min_cooldown_minutes?: number
+  dex_min_cooldown_minutes?: number        // Min cooldown even for high momentum (default: 30)
+  dex_max_consecutive_losses?: number      // Block after this many consecutive losses (default: 2)
+
+  // Proactive take profit
+  dex_take_profit_enabled?: boolean        // Enable proactive take profit (default: FALSE - let runners run)
+  dex_time_based_profit_pct?: number       // Min profit % for time-based exit (default: 15)
+  dex_time_based_hold_hours?: number       // Hours before time-based profit taking (default: 2)
+
+  // Momentum break - exit profitable positions when momentum dies
+  dex_momentum_break_enabled?: boolean     // Exit winners when momentum dies (default: true)
+  dex_momentum_break_threshold_pct?: number // Momentum drop % to trigger exit (default: 50)
+  dex_momentum_break_min_profit_pct?: number // Min profit to take on momentum break (default: 10)
+
+  // Cooldown behavior on API errors
+  dex_cooldown_fail_closed?: boolean       // Block re-entry on API errors (default: true)
+
+  // Lower trailing activation thresholds for high-risk tiers
+  dex_breakout_trailing_activation?: number // Trailing activation for breakout tier (default: 25)
+  dex_microspray_trailing_activation?: number // Trailing activation for microspray tier (default: 20)
   // Scaling trailing stop
   dex_scaling_trailing_enabled?: boolean       // Enable scaling trailing stop
   dex_scaling_trailing_activation_pct?: number // Activation threshold (default: 10%)
@@ -385,7 +404,8 @@ export interface Status {
       exitTime: number
       pnlPct: number
       pnlSol: number
-      exitReason: 'take_profit' | 'stop_loss' | 'lost_momentum' | 'manual'
+      exitReason: 'take_profit' | 'stop_loss' | 'lost_momentum' | 'manual' | 'scaling_trailing' | 'distribution_exit' | 'resistance_exit' | 'liquidity_exit' | 'stale_winner' | 'momentum_cliff' | 'trailing_stop' | 'breakeven_stop'
+      tier?: 'microspray' | 'breakout' | 'lottery' | 'early' | 'established'
     }>
     // Trading metrics (#15, #16, #17)
     winRate: number
@@ -399,6 +419,12 @@ export interface Status {
     maxDrawdownPct: number
     maxDrawdownDuration: number
     currentDrawdownPct: number
+    // Circuit breaker & drawdown pause (#10, #11)
+    circuitBreakerActive: boolean
+    circuitBreakerUntil: string | null
+    recentStopLosses: number
+    drawdownPaused: boolean
+    peakValue: number
   }
   dexPortfolioHistory?: DexPortfolioSnapshot[]
   // Crisis Mode

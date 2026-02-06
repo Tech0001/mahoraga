@@ -771,18 +771,25 @@ export class DexScreenerProvider {
     const priceChange5mVal = params.priceChange5m || 0;
 
     if (tier === "microspray") {
-      // Micro-spray: minimal scoring - just want to catch everything early
-      // Small bonus for any positive movement
-      tierBonus = priceChange1h > 0 ? Math.min(5, priceChange1h / 10) : 0;
+      // Micro-spray: 5m is the primary signal — these tokens move in minutes, not hours.
+      // If 5m is negative, momentum already reversed — penalize hard.
+      if (priceChange5mVal < 0) {
+        tierBonus = Math.max(-15, priceChange5mVal); // -15% 5m = -15 penalty
+      } else {
+        tierBonus = Math.min(15, priceChange5mVal / 3); // +45% 5m = 15 points
+      }
     } else if (tier === "breakout") {
       // Breakout: reward the 5-minute pump strength
       // This is the key signal - bigger pump = higher bonus
       tierBonus = Math.min(15, priceChange5mVal / 10); // +150% 5m = 15 points
     } else if (tier === "lottery") {
-      // Lottery tier: reward strong immediate momentum
-      // These are fresh launches - we want to see them pumping NOW
-      const immediateScore = Math.min(10, priceChange1h / 5); // +50% 1h = 10 points
-      tierBonus = immediateScore;
+      // Lottery: 5m is the primary signal — fresh launches pump and dump in minutes.
+      // If 5m is negative, you're buying the dump.
+      if (priceChange5mVal < 0) {
+        tierBonus = Math.max(-15, priceChange5mVal); // -15% 5m = -15 penalty
+      } else {
+        tierBonus = Math.min(15, priceChange5mVal / 5); // +75% 5m = 15 points
+      }
     } else if (tier === "early") {
       // Early tier: legitimacy matters more
       // Scale legitimacy (0-100) to bonus (0-10)

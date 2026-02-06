@@ -24,6 +24,7 @@ export interface Env {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   BIRDEYE_API_KEY?: string;
+  JUPITER_API_KEY?: string;
   MAHORAGA_API_TOKEN: string;
   KILL_SWITCH_SECRET: string;
 

@@ -252,29 +252,6 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
       // ═══════════════════════════════════════════════════════════════════════
 
-      // ═══════════════════════════════════════════════════════════════════════
-      // DEX FIRST - Check exits every 10s cycle, don't wait for slow phases
-      // Discovery scan runs on its own interval (not every cycle)
-      // ═══════════════════════════════════════════════════════════════════════
-      if (this.state.config.dex_enabled) {
-        // Always check exits first using existing signals + Jupiter prices
-        if (Object.keys(this.state.dexPositions).length > 0) {
-          this.log("System", "phase_start", { phase: "dex_exits" });
-          await dexTrading.runDexTrading(this.getContext());
-        }
-
-        // Discovery scan: find new tokens + check entries (slower, not every cycle)
-        const dexScanInterval = this.state.config.dex_scan_interval_ms ?? 60_000;
-        if (now - this.state.lastDexScanRun >= dexScanInterval) {
-          this.log("System", "phase_start", { phase: "dex_discovery" });
-          await gatherers.gatherDexMomentum(this.getContext());
-          await dexTrading.runDexTrading(this.getContext());
-          this.state.lastDexScanRun = now;
-        }
-
-        await dexTrading.recordDexSnapshot(this.getContext());
-      }
-
       if (now - this.state.lastDataGatherRun >= this.state.config.data_poll_interval_ms) {
         this.log("System", "phase_start", { phase: "data_gather" });
         await this.runDataGatherers();
@@ -295,6 +272,15 @@ export class MahoragaHarness extends DurableObject<Env> {
 
       if (this.state.config.crypto_enabled) {
         await trading.runCryptoTrading(this.getContext(), alpaca, positions);
+      }
+
+      // DEX momentum trading (Solana tokens via DexScreener/Jupiter)
+      if (this.state.config.dex_enabled) {
+        this.log("System", "phase_start", { phase: "dex_trading" });
+        await gatherers.gatherDexMomentum(this.getContext());
+        await dexTrading.runDexTrading(this.getContext());
+        // Always record snapshot when DEX is enabled (for chart history)
+        await dexTrading.recordDexSnapshot(this.getContext());
       }
 
       if (clock.is_open) {
@@ -347,7 +333,7 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async scheduleNextAlarm(): Promise<void> {
-    const nextRun = Date.now() + 10_000;  // 10 seconds - fast exit checks via Jupiter
+    const nextRun = Date.now() + 30_000;  // 30 seconds
     await this.ctx.storage.setAlarm(nextRun);
   }
 

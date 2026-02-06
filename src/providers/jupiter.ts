@@ -42,7 +42,88 @@ export interface JupiterSwapResult {
 }
 
 const JUPITER_API = "https://quote-api.jup.ag/v6";
+const JUPITER_PRICE_API = "https://api.jup.ag/price/v3";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+/**
+ * Jupiter Price API v3 response
+ */
+export interface JupiterPriceData {
+  usdPrice: number;
+  blockId: string;
+  decimals: number;
+  priceChange24h?: number;
+}
+
+export interface JupiterPriceResponse {
+  [mintAddress: string]: JupiterPriceData;
+}
+
+/**
+ * Fetch batch prices from Jupiter Price API
+ *
+ * Jupiter's Price API is fast and supports batching up to 100 tokens.
+ * Prices are in USD and updated every few seconds.
+ *
+ * @param mintAddresses - Array of token mint addresses (max 100)
+ * @param apiKey - Optional Jupiter API key (required since late 2025)
+ * @returns Map of mint address to USD price
+ */
+export async function getJupiterPrices(
+  mintAddresses: string[],
+  apiKey?: string
+): Promise<Map<string, number>> {
+  const prices = new Map<string, number>();
+
+  if (mintAddresses.length === 0) return prices;
+
+  // Jupiter supports up to 100 tokens per request
+  const chunks = [];
+  for (let i = 0; i < mintAddresses.length; i += 100) {
+    chunks.push(mintAddresses.slice(i, i + 100));
+  }
+
+  for (const chunk of chunks) {
+    try {
+      const ids = chunk.join(",");
+      const url = `${JUPITER_PRICE_API}?ids=${ids}`;
+
+      const headers: Record<string, string> = {
+        "Accept": "application/json",
+      };
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
+      }
+
+      const res = await fetch(url, { headers });
+
+      if (!res.ok) {
+        console.error(`Jupiter Price API error: ${res.status} ${res.statusText}`);
+        continue;
+      }
+
+      const data = await res.json() as JupiterPriceResponse;
+
+      for (const [mintAddress, priceData] of Object.entries(data)) {
+        if (priceData?.usdPrice && priceData.usdPrice > 0) {
+          prices.set(mintAddress, priceData.usdPrice);
+        }
+      }
+    } catch (e) {
+      console.error("Jupiter Price API fetch error:", e);
+    }
+  }
+
+  return prices;
+}
+
+/**
+ * Get single token price from Jupiter
+ */
+export async function getJupiterPrice(mintAddress: string, apiKey?: string): Promise<number | null> {
+  const prices = await getJupiterPrices([mintAddress], apiKey);
+  return prices.get(mintAddress) ?? null;
+}
 
 export class JupiterProvider {
   private walletPublicKey?: string;

@@ -34,7 +34,10 @@
       "Bash(ls:*)",
       "Bash(source .dev.vars)",
       "Bash(export ALPACA_API_KEY=PKGR2CT2MXH2EAHUVVIBU4HSJO)",
-      "Bash(export ALPACA_API_SECRET=2VUwoULKWFh98kLJciviZEsEe3xhMjQKrMVPtGtukQ7s)"
+      "Bash(export ALPACA_API_SECRET=2VUwoULKWFh98kLJciviZEsEe3xhMjQKrMVPtGtukQ7s)",
+      "WebSearch",
+      "WebFetch(domain:dev.jup.ag)",
+      "WebFetch(domain:hub.jup.ag)"
     ]
   }
 }

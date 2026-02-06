@@ -346,8 +346,8 @@ export async function gatherCrypto(ctx: HarnessContext): Promise<Signal[]> {
 export async function gatherDexMomentum(ctx: HarnessContext): Promise<void> {
   if (!ctx.state.config.dex_enabled) return;
 
-  const SCAN_INTERVAL_MS = 30_000; // 30 seconds between scans
-  if (Date.now() - ctx.state.lastDexScanRun < SCAN_INTERVAL_MS) return;
+  // Scan interval is now controlled by the alarm handler (dex_scan_interval_ms)
+  // No rate limiting here - caller decides when to scan
 
   try {
     const dexScreener = createDexScreenerProvider();
@@ -385,53 +385,21 @@ export async function gatherDexMomentum(ctx: HarnessContext): Promise<void> {
       minPriceChange24h: ctx.state.config.dex_min_price_change,
     });
 
-    // Preserve signals for tokens that have open positions (don't drop price data)
+    // Don't preserve stale signals for open positions.
+    // When a token falls off DexScreener trending, the missing signal triggers
+    // the lost_momentum exit path (missedScans counter) which cuts losers fast at -1%.
+    // Prices for open positions come from Jupiter Price API + lastKnownPrice cache.
     const openPositionAddresses = new Set(Object.keys(ctx.state.dexPositions));
     const newSignalAddresses = new Set(signals.map(s => s.tokenAddress));
-
-    // Keep old signals for open positions that aren't in the new scan
-    const preservedSignals = ctx.state.dexSignals.filter(s =>
-      openPositionAddresses.has(s.tokenAddress) && !newSignalAddresses.has(s.tokenAddress)
-    );
-
-    if (preservedSignals.length > 0) {
-      ctx.log("DexMomentum", "preserving_signals_for_positions", {
-        preserved: preservedSignals.map(s => s.symbol),
-        reason: "Token has open position but not in current scan",
+    const droppedPositions = [...openPositionAddresses].filter(addr => !newSignalAddresses.has(addr));
+    if (droppedPositions.length > 0) {
+      ctx.log("DexMomentum", "signals_dropped_for_positions", {
+        dropped: droppedPositions.map(addr => ctx.state.dexPositions[addr]?.symbol || addr.slice(0, 8)),
+        reason: "Token fell off trending - lost_momentum exit will evaluate",
       });
     }
 
-    // Refresh prices for open positions that aren't in the new scan
-    if (preservedSignals.length > 0) {
-      try {
-        const addressesToRefresh = preservedSignals.map(s => s.tokenAddress);
-        const freshPairs = await dexScreener.getMultipleTokens("solana", addressesToRefresh);
-
-        // Update preserved signals with fresh prices
-        for (const sig of preservedSignals) {
-          const freshPair = freshPairs.find(p => p.baseToken?.address === sig.tokenAddress);
-          if (freshPair) {
-            sig.priceUsd = parseFloat(freshPair.priceUsd || "0");
-            sig.liquidity = freshPair.liquidity?.usd || sig.liquidity;
-            sig.priceChange24h = freshPair.priceChange?.h24 || 0;
-            sig.priceChange6h = freshPair.priceChange?.h6 || 0;
-            sig.priceChange1h = freshPair.priceChange?.h1 || 0;
-            sig.priceChange5m = freshPair.priceChange?.m5 || 0;
-
-            ctx.log("DexMomentum", "refreshed_position_price", {
-              symbol: sig.symbol,
-              price: sig.priceUsd.toFixed(10),
-              liquidity: "$" + Math.round(sig.liquidity).toLocaleString(),
-            });
-          }
-        }
-      } catch (error) {
-        ctx.log("DexMomentum", "price_refresh_error", { error: String(error) });
-      }
-    }
-
-    ctx.state.dexSignals = [...signals, ...preservedSignals];
-    ctx.state.lastDexScanRun = Date.now();
+    ctx.state.dexSignals = signals;
 
     // Add to signalCache so they show in dashboard active signals
     const now = Date.now();
