@@ -1033,7 +1033,7 @@ export default function App() {
           {/* Momo Scanner (stocks) - Row 2.4: momentum lanes grouped, stocks above DEX */}
           <div className="col-span-4 md:col-span-8 lg:col-span-12">
             <Panel
-              title="MOMO SCANNER (STOCKS)"
+              title="MOMENTUM (STOCKS)"
               titleRight={
                 (status?.momoWatchlist?.length || 0) > 0
                   ? `${status?.momoWatchlist?.length} · ${status?.momoWatchlist?.[0]?.session === 'premarket' ? 'PREMARKET' : 'MARKET HOURS'}`
