@@ -121,7 +121,7 @@ JSON response:
         { role: "system", content: "You are a stock research analyst. Be skeptical of hype. Output valid JSON only." },
         { role: "user", content: prompt },
       ],
-      max_tokens: 250,
+      max_tokens: 600,
       temperature: 0.3,
       response_format: { type: "json_object" }
     });

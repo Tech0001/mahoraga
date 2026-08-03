@@ -47,9 +47,13 @@ export class OpenAIProvider implements LLMProvider {
       body.response_format = params.response_format;
     }
 
-    // OpenRouter reports the exact billed cost in usage when asked.
+    // OpenRouter: report exact billed cost, and disable reasoning — these are
+    // structured-output calls where reasoning tokens silently consume the
+    // max_tokens budget and return empty content (observed with deepseek-v4).
+    // Models without toggleable reasoning ignore the flag.
     if (this.baseUrl.includes("openrouter.ai")) {
       body.usage = { include: true };
+      body.reasoning = { enabled: false };
     }
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
