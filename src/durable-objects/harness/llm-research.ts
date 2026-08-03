@@ -22,15 +22,24 @@ export function trackLLMCost(
   ctx: HarnessContext,
   model: string,
   tokensIn: number,
-  tokensOut: number
+  tokensOut: number,
+  actualCostUsd?: number
 ): number {
+  // Estimation fallback only — OpenRouter responses carry the exact billed
+  // cost (actualCostUsd), which always wins when present. Rates are $/M.
   const pricing: Record<string, { input: number; output: number }> = {
     "gpt-4o": { input: 2.5, output: 10 },
     "gpt-4o-mini": { input: 0.15, output: 0.6 },
+    "deepseek/deepseek-v4-flash-0731": { input: 0.09, output: 0.18 },
+    "deepseek/deepseek-v4-pro": { input: 0.435, output: 0.87 },
   };
 
-  const rates = pricing[model] ?? pricing["gpt-4o"]!;
-  const cost = (tokensIn * rates.input + tokensOut * rates.output) / 1_000_000;
+  // Unknown model: estimate with mid-tier rates rather than gpt-4o frontier
+  // rates, which overstated cheap models by 10-25x.
+  const rates = pricing[model] ?? { input: 0.5, output: 2 };
+  const cost = typeof actualCostUsd === "number" && Number.isFinite(actualCostUsd)
+    ? actualCostUsd
+    : (tokensIn * rates.input + tokensOut * rates.output) / 1_000_000;
 
   ctx.state.costTracker.total_usd += cost;
   ctx.state.costTracker.calls++;
@@ -119,7 +128,7 @@ JSON response:
 
     const usage = response.usage;
     if (usage) {
-      trackLLMCost(ctx, ctx.state.config.llm_model, usage.prompt_tokens, usage.completion_tokens);
+      trackLLMCost(ctx, ctx.state.config.llm_model, usage.prompt_tokens, usage.completion_tokens, usage.cost_usd);
     }
 
     const content = response.content || "{}";
@@ -280,7 +289,7 @@ Provide a brief risk assessment and recommendation (HOLD, SELL, or ADD). JSON fo
 
     const usage = response.usage;
     if (usage) {
-      trackLLMCost(ctx, ctx.state.config.llm_model, usage.prompt_tokens, usage.completion_tokens);
+      trackLLMCost(ctx, ctx.state.config.llm_model, usage.prompt_tokens, usage.completion_tokens, usage.cost_usd);
     }
 
     const content = response.content || "{}";
@@ -418,7 +427,7 @@ Response format:
 
     const usage = response.usage;
     if (usage) {
-      trackLLMCost(ctx, ctx.state.config.llm_analyst_model, usage.prompt_tokens, usage.completion_tokens);
+      trackLLMCost(ctx, ctx.state.config.llm_analyst_model, usage.prompt_tokens, usage.completion_tokens, usage.cost_usd);
     }
 
     const content = response.content || "{}";

@@ -20,6 +20,7 @@ interface OpenAIResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    cost?: number;
   };
 }
 
@@ -44,6 +45,11 @@ export class OpenAIProvider implements LLMProvider {
 
     if (params.response_format) {
       body.response_format = params.response_format;
+    }
+
+    // OpenRouter reports the exact billed cost in usage when asked.
+    if (this.baseUrl.includes("openrouter.ai")) {
+      body.usage = { include: true };
     }
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -73,6 +79,7 @@ export class OpenAIProvider implements LLMProvider {
         prompt_tokens: data.usage.prompt_tokens,
         completion_tokens: data.usage.completion_tokens,
         total_tokens: data.usage.total_tokens,
+        cost_usd: typeof data.usage.cost === "number" ? data.usage.cost : undefined,
       },
     };
   }

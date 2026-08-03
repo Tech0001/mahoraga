@@ -587,7 +587,7 @@ JSON response:
 
     const usage = response.usage;
     if (usage) {
-      trackLLMCost(ctx, ctx.state.config.llm_model, usage.prompt_tokens, usage.completion_tokens);
+      trackLLMCost(ctx, ctx.state.config.llm_model, usage.prompt_tokens, usage.completion_tokens, usage.cost_usd);
     }
 
     const content = response.content || "{}";

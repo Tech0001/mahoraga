@@ -293,6 +293,9 @@ export interface CompletionResult {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    // Exact billed USD cost when the gateway reports it (OpenRouter does);
+    // consumers fall back to estimated pricing tables when absent.
+    cost_usd?: number;
   };
 }
 
