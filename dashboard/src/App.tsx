@@ -1060,7 +1060,19 @@ export default function App() {
                     </thead>
                     <tbody>
                       {(status?.momoWatchlist ?? []).map(c => (
-                        <tr key={c.symbol} className="border-t border-hud-line/20">
+                        <tr
+                          key={c.symbol}
+                          className="border-t border-hud-line/20 hover:bg-hud-line/10 cursor-pointer"
+                          onClick={() =>
+                            window.open(
+                              `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
+                                c.exchange ? `${c.exchange}:${c.symbol}` : c.symbol
+                              )}`,
+                              '_blank'
+                            )
+                          }
+                          title={`Open ${c.symbol} chart on TradingView`}
+                        >
                           <td className="py-1">
                             <span className="hud-value-sm">{c.symbol}</span>
                             {c.nearHigh && <span className="text-[8px] text-hud-success ml-1" title="Holding near session high">▲HI</span>}
