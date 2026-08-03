@@ -1051,6 +1051,7 @@ export default function App() {
                       <tr className="hud-label">
                         <th className="pb-1 font-normal">SYM</th>
                         <th className="pb-1 font-normal">SETUP</th>
+                        <th className="pb-1 font-normal">CAT</th>
                         <th className="pb-1 font-normal text-right">PRICE</th>
                         <th className="pb-1 font-normal text-right">CHG</th>
                         <th className="pb-1 font-normal text-right">RVOL</th>
@@ -1095,6 +1096,18 @@ export default function App() {
                               return (
                                 <span className={`hud-value-sm ${color}`} title={`${r.note}${plan} | VWAP ${r.distFromVwapPct >= 0 ? '+' : ''}${r.distFromVwapPct.toFixed(1)}%`}>
                                   {r.setup}
+                                </span>
+                              )
+                            })()}
+                          </td>
+                          <td className="py-1">
+                            {(() => {
+                              const cat = status?.momoCatalysts?.[c.symbol]
+                              if (!cat) return <span className="hud-value-sm text-hud-text-dim">—</span>
+                              const color = cat.grade === 'A' || cat.grade === 'B' ? 'text-hud-success' : cat.grade === 'C' ? 'text-hud-warning' : 'text-hud-error'
+                              return (
+                                <span className={`hud-value-sm ${color}`} title={`${cat.catalyst}${cat.dilutionRisk ? ' | DILUTION RISK' : ''} | ${cat.reasoning}`}>
+                                  {cat.grade}{cat.dilutionRisk ? '!' : ''}
                                 </span>
                               )
                             })()}

@@ -184,6 +184,87 @@ JSON response:
 }
 
 /**
+ * Premarket catalyst check for the momo watchlist: fetch real headlines and
+ * grade why each name is gapping. A = fundamental catalyst (earnings beat,
+ * FDA, major contract); B = real news, retail-driven; C = sympathy/technical,
+ * no primary news; D = dilution/offering/pump risk. Grades are informational
+ * gates for the momentum lane and the Director's morning read.
+ */
+export async function gradeWatchlistCatalysts(ctx: HarnessContext): Promise<void> {
+  if (!ctx.llm) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const cache = ctx.state.momoCatalysts ?? (ctx.state.momoCatalysts = {});
+  const alpaca = createAlpacaProviders(ctx.env);
+
+  const targets = ctx.state.momoWatchlist.slice(0, 6).filter(c => cache[c.symbol]?.day !== day);
+  for (const cand of targets) {
+    try {
+      const news = await alpaca.marketData.getNews(cand.symbol, 6).catch(() => []);
+      const headlines = news
+        .map(n => `- [${n.created_at.slice(0, 16)}] ${n.headline}${n.summary ? ` — ${n.summary.slice(0, 120)}` : ""}`)
+        .join("\n") || "(no headlines in the news feed)";
+
+      const prompt = `${cand.symbol} is gapping ${cand.changePct >= 0 ? "+" : ""}${cand.changePct.toFixed(1)}% premarket on ${(cand.volume / 1e6).toFixed(1)}M shares (rvol ${cand.rvol.toFixed(1)}x, float ${cand.floatShares ? (cand.floatShares / 1e6).toFixed(0) + "M" : "unknown"}).
+
+Recent headlines:
+${headlines}
+
+Identify the catalyst and grade its sustainability for a momentum day trade:
+A = fundamental catalyst (earnings/guidance beat, FDA approval, major contract) with follow-through potential
+B = real news, likely retail-driven, tradeable but fade-prone
+C = sympathy play or purely technical move, no primary news
+D = dilution/offering/reverse-split/pump risk — avoid
+
+JSON response:
+{"grade": "A|B|C|D", "catalyst": "one line", "dilution_risk": true/false, "reasoning": "brief"}`;
+
+      const response = await ctx.llm.complete({
+        model: ctx.state.config.llm_analyst_model,
+        messages: [
+          { role: "system", content: "You are a premarket catalyst analyst for momentum day trading. Be skeptical; dilution and pumps are graded D. Output valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 400,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      });
+      const usage = response.usage;
+      if (usage) {
+        trackLLMCost(ctx, ctx.state.config.llm_analyst_model, usage.prompt_tokens, usage.completion_tokens, usage.cost_usd);
+      }
+
+      const parsed = JSON.parse((response.content || "{}").replace(/```json\n?|```/g, "").trim()) as Record<string, unknown>;
+      const grade = parsed.grade === "A" || parsed.grade === "B" || parsed.grade === "C" || parsed.grade === "D"
+        ? parsed.grade
+        : null;
+      if (!grade) {
+        ctx.log("Momentum", "invalid_catalyst_response", { symbol: cand.symbol, snippet: (response.content || "").slice(0, 100) });
+        continue;
+      }
+      cache[cand.symbol] = {
+        day,
+        grade,
+        catalyst: typeof parsed.catalyst === "string" ? parsed.catalyst.slice(0, 140) : "",
+        dilutionRisk: parsed.dilution_risk === true,
+        reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning.slice(0, 200) : "",
+      };
+      ctx.log("Momentum", "catalyst_graded", {
+        symbol: cand.symbol,
+        grade,
+        catalyst: cache[cand.symbol]!.catalyst,
+        dilutionRisk: cache[cand.symbol]!.dilutionRisk,
+      });
+    } catch (e) {
+      ctx.log("Momentum", "catalyst_error", { symbol: cand.symbol, error: String(e).slice(0, 120) });
+    }
+  }
+
+  for (const sym of Object.keys(cache)) {
+    if (cache[sym]!.day !== day) delete cache[sym];
+  }
+}
+
+/**
  * Research top N signals from the signal cache
  * Filters out held positions and aggregates by symbol
  */

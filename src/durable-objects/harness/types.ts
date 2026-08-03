@@ -538,6 +538,11 @@ export interface AgentState {
   momentumPositions: Record<string, MomentumPosition>;
   momentumTrades: MomentumTradeRecord[];
   momentumDay: { day: string; realizedUsd: number } | null;
+  // Premarket catalyst grades (LLM over real headlines), keyed by symbol
+  momoCatalysts?: Record<
+    string,
+    { day: string; grade: "A" | "B" | "C" | "D"; catalyst: string; dilutionRisk: boolean; reasoning: string }
+  >;
   // Daily-context cache (blue sky / overhead) — one bars fetch per symbol per day
   momoDailyContext?: Record<string, { day: string; blueSky: boolean | null; overheadPct: number | null }>;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;

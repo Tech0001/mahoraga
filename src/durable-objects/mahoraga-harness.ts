@@ -337,6 +337,10 @@ export class MahoragaHarness extends DurableObject<Env> {
             ? nextCloseMs - 6.5 * 3600 * 1000
             : null;
           await gatherers.gatherMomoWatchlist(this.getContext(), inPremarket, sessionOpenMs);
+          // Catalyst grades: premarket only, once per symbol per day
+          if (inPremarket) {
+            await llmResearch.gradeWatchlistCatalysts(this.getContext());
+          }
         } catch (e) {
           this.log("System", "phase_error", { phase: "momo_scan", error: String(e).slice(0, 160) });
         }

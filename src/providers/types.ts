@@ -199,6 +199,7 @@ export interface BrokerProvider {
 }
 
 export interface MarketDataProvider {
+  getNews(symbol: string, limit?: number): Promise<NewsItem[]>;
   getBars(symbol: string, timeframe: string, params?: BarsParams): Promise<Bar[]>;
   getLatestBar(symbol: string): Promise<Bar>;
   getLatestBars(symbols: string[]): Promise<Record<string, Bar>>;

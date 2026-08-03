@@ -132,6 +132,7 @@ export async function handleStatus(ctx: RoutesContext): Promise<Response> {
       momoWatchlist: ctx.state.momoWatchlist ?? [],
       momoWatchlistUpdatedAt: ctx.state.momoWatchlistUpdatedAt ?? 0,
       momoCharts: ctx.state.momoCharts ?? {},
+      momoCatalysts: ctx.state.momoCatalysts ?? {},
       momentumLane: {
         enabled: ctx.state.config.momentum_trading_enabled ?? false,
         positions: Object.values(ctx.state.momentumPositions ?? {}),

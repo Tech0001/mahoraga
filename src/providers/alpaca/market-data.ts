@@ -1,5 +1,5 @@
 import type { AlpacaClient } from "./client";
-import type { Bar, Quote, Snapshot, BarsParams, MarketDataProvider } from "../types";
+import type { Bar, Quote, Snapshot, BarsParams, MarketDataProvider, NewsItem } from "../types";
 
 interface AlpacaBarsResponse {
   bars: Record<string, AlpacaBar[]>;
@@ -90,6 +90,29 @@ function parseSnapshot(symbol: string, raw: AlpacaSnapshot): Snapshot {
 
 export class AlpacaMarketDataProvider implements MarketDataProvider {
   constructor(private client: AlpacaClient) {}
+
+  async getNews(symbol: string, limit = 6): Promise<NewsItem[]> {
+    const response = await this.client.dataRequest<{
+      news?: Array<{
+        id?: number | string;
+        headline?: string;
+        summary?: string;
+        created_at?: string;
+        source?: string;
+        url?: string;
+        symbols?: string[];
+      }>;
+    }>("GET", "/v1beta1/news", { symbols: symbol, limit });
+    return (response?.news ?? []).map(n => ({
+      id: String(n.id ?? ""),
+      headline: n.headline ?? "",
+      summary: (n.summary ?? "").slice(0, 300),
+      created_at: n.created_at ?? "",
+      source: n.source ?? "",
+      url: n.url,
+      symbols: n.symbols ?? [symbol],
+    }));
+  }
 
   async getBars(
     symbol: string,
