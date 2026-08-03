@@ -96,6 +96,8 @@ export interface AgentConfig {
   dex_structure_gate_enabled: boolean; // Require reversal structure (candles) before entry
   dex_structure_exits_enabled: boolean; // Structural exits: wedge/VWAP-lost/breakdown + sell-into-strength
   dex_structure_top_vwap_pct: number; // [TUNE] "Vertical" = this % above VWAP for structure_top exits
+  dex_cap_override_enabled: boolean; // RECLAIM + expanding volume can override the 1h cap (Doom-class runners)
+  dex_cap_override_max_1h_pct: number; // [TUNE] Hard ceiling — above this nothing overrides
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position

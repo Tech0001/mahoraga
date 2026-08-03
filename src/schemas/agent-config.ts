@@ -29,6 +29,8 @@ export const AgentConfigSchema = z.object({
   dex_structure_gate_enabled: z.boolean(),
   dex_structure_exits_enabled: z.boolean(),
   dex_structure_top_vwap_pct: z.number().min(5).max(200),
+  dex_cap_override_enabled: z.boolean(),
+  dex_cap_override_max_1h_pct: z.number().min(150).max(2000),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

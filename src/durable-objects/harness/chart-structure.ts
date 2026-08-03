@@ -44,6 +44,8 @@ export interface ChartRead {
   distFromHodPct: number;
   higherLows: number;
   lowerHighs: number;
+  // Recent bars carrying above-average volume (buyers actually participating)
+  volumeExpanding: boolean;
   // Daily context (when daily bars provided)
   blueSky: boolean | null; // within 2% of / above 52-week high — no overhead supply
   overheadPct: number | null; // % up to the 60-day high (0 = at/above it)
@@ -250,6 +252,7 @@ export function readChart(
     distFromHodPct,
     higherLows,
     lowerHighs,
+    volumeExpanding,
     blueSky,
     overheadPct,
     asOf: Date.now(),

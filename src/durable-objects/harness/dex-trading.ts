@@ -1208,6 +1208,42 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     // +413%, +247% at entry; the winners entered at +13% median or on dips).
     const maxEntry1h = ctx.state.config.dex_max_entry_1h_change ?? 150;
     if ((candidate.priceChange1h ?? 0) > maxEntry1h) {
+      // Cap override (Director + Doom, journal entry 38): between the cap and
+      // a hard ceiling, a token with a CONFIRMED reclaim structure AND volume
+      // expanding on the climb gets through — the cap can't distinguish a
+      // vertical candle from a dip-and-base at the same 1h number; the chart
+      // can. Above the ceiling nothing overrides (BABYCATE's +1469% "bases"
+      // were the re-bait before -98%). No override on fetch failure.
+      const overrideOn = ctx.state.config.dex_cap_override_enabled ?? true;
+      const overrideCeiling = ctx.state.config.dex_cap_override_max_1h_pct ?? 500;
+      let capOverridden = false;
+      if (overrideOn && (candidate.priceChange1h ?? 0) <= overrideCeiling) {
+        try {
+          const gecko = createGeckoTerminalProvider();
+          const bars = await gecko.getMinuteBars(candidate.chain ?? "solana", candidate.pairAddress, 120);
+          if (bars.length >= 15) {
+            const read = readChart(bars, null);
+            if (read) {
+              if (!ctx.state.dexCharts) ctx.state.dexCharts = {};
+              ctx.state.dexCharts[candidate.tokenAddress] = read;
+              if (read.setup === "RECLAIM" && read.volumeExpanding) {
+                capOverridden = true;
+                ctx.log("DexMomentum", "cap_override_reclaim", {
+                  symbol: candidate.symbol,
+                  priceChange1h: (candidate.priceChange1h ?? 0).toFixed(0) + "%",
+                  vol1hUsd: Math.round(candidate.volume1h ?? 0),
+                  buyRatio1h: (candidate.buyRatio1h ?? 0).toFixed(2),
+                  note: read.note.slice(0, 80),
+                });
+              }
+            }
+          }
+        } catch { /* cap stands on any failure */ }
+      }
+      if (capOverridden) {
+        // fall through to the remaining gates (persistence, sell-floor, route,
+        // structure) — the override only neutralizes the 1h-change block
+      } else {
       ctx.log("DexMomentum", "entry_blocked_overextended", {
         symbol: candidate.symbol,
         priceChange1h: (candidate.priceChange1h ?? 0).toFixed(0) + "%",
@@ -1225,6 +1261,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         };
       }
       continue;
+      }
     }
 
     const firstSeen = ctx.state.dexCandidateFirstSeen[candidate.tokenAddress] ?? nowSeen;

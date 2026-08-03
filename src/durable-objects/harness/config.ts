@@ -39,6 +39,8 @@ export const DEFAULT_CONFIG: AgentConfig = {
   dex_structure_gate_enabled: true,
   dex_structure_exits_enabled: true,
   dex_structure_top_vwap_pct: 25,
+  dex_cap_override_enabled: true,
+  dex_cap_override_max_1h_pct: 500,
   max_position_value: 5000,
   max_positions: 5,
   min_sentiment_score: 0.3,
