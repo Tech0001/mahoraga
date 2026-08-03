@@ -53,7 +53,10 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
   // Jupiter Price API - batch fetch real-time prices for open positions
   // Requires JUPITER_API_KEY in env. When configured, provides sub-second pricing.
   // Without it, falls back to DexScreener signal prices + lastKnownPrice cache.
-  const positionAddresses = Object.keys(ctx.state.dexPositions);
+  // Jupiter prices Solana only; other chains price via signal/DexScreener-direct.
+  const positionAddresses = Object.entries(ctx.state.dexPositions)
+    .filter(([, p]) => (p.chain ?? "solana") === "solana")
+    .map(([addr]) => addr);
   let jupiterPrices = new Map<string, number>();
   const jupiterApiKey = ctx.env.JUPITER_API_KEY;
   // Price API v3 works unauthenticated (verified 2026-08-03); a key only
@@ -100,7 +103,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       // direct pair lookup before trusting it.
       let directPrice = 0;
       try {
-        const pairs = await dexScreener.getTokenPairs("solana", tokenAddress);
+        const pairs = await dexScreener.getTokenPairs(position.chain ?? "solana", tokenAddress);
         const best = (pairs ?? [])
           .filter(p => parseFloat(p.priceUsd) > 0)
           .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
@@ -616,6 +619,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       const tradeRecord: DexTradeRecord = {
         symbol: position.symbol,
         tokenAddress,
+        chain: position.chain ?? "solana",
         entryPrice: position.entryPrice,
         exitPrice: exitPriceWithSlippage,
         entrySol: position.entrySol,
@@ -1116,6 +1120,11 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     // Honeypot gate 2 — exit-route viability (paper-safe analog of the dust
     // canary): ask Jupiter for a real SELL quote before entering. No route or
     // huge impact means the exit door does not exist.
+    // Jupiter is Solana-only: non-Solana chains skip this gate (sell-activity
+    // floor still applies); the EVM analog is a Uniswap Quoter call (TODO).
+    if ((candidate.chain ?? "solana") !== "solana") {
+      ctx.log("DexMomentum", "route_check_skipped_chain", { symbol: candidate.symbol, chain: candidate.chain });
+    } else
     try {
       const jup = createJupiterProvider();
       const tokenUnits = Math.floor((0.02 * solPriceUsd / Math.max(candidate.priceUsd, 1e-12)) * 1e6); // ~position value in 6-dec units
@@ -1376,6 +1385,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
 
     // Create paper position
     const position: DexPosition = {
+      chain: candidate.chain ?? "solana",
       tokenAddress: candidate.tokenAddress,
       symbol: candidate.symbol,
       entryPrice: entryPriceWithSlippage,

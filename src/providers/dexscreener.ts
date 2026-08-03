@@ -73,6 +73,9 @@ export interface LegitimacySignals {
 }
 
 export interface DexMomentumSignal {
+  // Which chain this token trades on ("solana", "robinhood", ...) — flows
+  // into positions and trade records for per-chain expectancy comparison.
+  chain: string;
   symbol: string;
   tokenAddress: string;
   pairAddress: string;
@@ -219,7 +222,7 @@ export class DexScreenerProvider {
   /**
    * Get trending/top pairs on Solana using orders endpoint
    */
-  async getTrendingPairs(): Promise<DexPair[]> {
+  async getTrendingPairs(chain: string = "solana"): Promise<DexPair[]> {
     await this.throttle();
 
     // Use the token-boosts endpoint to find tokens getting attention
@@ -227,13 +230,13 @@ export class DexScreenerProvider {
     if (!boostsRes.ok) return [];
 
     const boosts: DexTokenProfile[] = await boostsRes.json();
-    const solanaBoosts = boosts.filter(b => b.chainId === "solana").slice(0, 30);
+    const chainBoosts = boosts.filter(b => b.chainId === chain).slice(0, 30);
 
-    if (solanaBoosts.length === 0) return [];
+    if (chainBoosts.length === 0) return [];
 
     // Get pair data for boosted tokens
-    const addresses = solanaBoosts.map(b => b.tokenAddress);
-    return this.getMultipleTokens("solana", addresses);
+    const addresses = chainBoosts.map(b => b.tokenAddress);
+    return this.getMultipleTokens(chain, addresses);
   }
 
   /**
@@ -274,6 +277,8 @@ export class DexScreenerProvider {
     // Shared filters
     minVolume24h?: number;
     minPriceChange24h?: number;
+    // Chain to scan ("solana" default; "robinhood" etc.)
+    chain?: string;
   } = {}): Promise<DexMomentumSignal[]> {
     const {
       // Micro-spray tier - ultra-tiny lottery tickets [OFF by default]
@@ -305,6 +310,7 @@ export class DexScreenerProvider {
       // Shared
       minVolume24h = 10000,
       minPriceChange24h = 5,
+      chain = "solana",
     } = options;
 
     // Gather pairs from multiple sources for better coverage
@@ -313,7 +319,7 @@ export class DexScreenerProvider {
 
     // Source 1: Trending/boosted tokens
     try {
-      const trendingPairs = await this.getTrendingPairs();
+      const trendingPairs = await this.getTrendingPairs(chain);
       for (const pair of trendingPairs) {
         if (!seenAddresses.has(pair.baseToken.address)) {
           seenAddresses.add(pair.baseToken.address);
@@ -326,7 +332,7 @@ export class DexScreenerProvider {
 
     // Source 2: Latest profiles (tokens updating their info = active projects)
     try {
-      const profiles = await this.getLatestProfiles("solana");
+      const profiles = await this.getLatestProfiles(chain);
       if (profiles.length > 0) {
         const addresses = profiles
           .map(p => p.tokenAddress)
@@ -334,7 +340,7 @@ export class DexScreenerProvider {
           .slice(0, 30);
 
         if (addresses.length > 0) {
-          const pairs = await this.getMultipleTokens("solana", addresses);
+          const pairs = await this.getMultipleTokens(chain, addresses);
           for (const pair of pairs) {
             if (!seenAddresses.has(pair.baseToken.address)) {
               seenAddresses.add(pair.baseToken.address);
@@ -351,13 +357,13 @@ export class DexScreenerProvider {
     try {
       const latestBoosts = await this.getLatestBoosts();
       const solanaLatestBoosts = (Array.isArray(latestBoosts) ? latestBoosts : [latestBoosts])
-        .filter(b => b?.chainId === "solana" && b?.tokenAddress)
+        .filter(b => b?.chainId === chain && b?.tokenAddress)
         .filter(b => !seenAddresses.has(b.tokenAddress))
         .slice(0, 20);
 
       if (solanaLatestBoosts.length > 0) {
         const addresses = solanaLatestBoosts.map(b => b.tokenAddress);
-        const pairs = await this.getMultipleTokens("solana", addresses);
+        const pairs = await this.getMultipleTokens(chain, addresses);
         for (const pair of pairs) {
           if (!seenAddresses.has(pair.baseToken.address)) {
             seenAddresses.add(pair.baseToken.address);
@@ -373,13 +379,13 @@ export class DexScreenerProvider {
     try {
       const takeovers = await this.getCommunityTakeovers();
       const solanaTakeovers = takeovers
-        .filter(t => t.chainId === "solana")
+        .filter(t => t.chainId === chain)
         .filter(t => !seenAddresses.has(t.tokenAddress))
         .slice(0, 15);
 
       if (solanaTakeovers.length > 0) {
         const addresses = solanaTakeovers.map(t => t.tokenAddress);
-        const pairs = await this.getMultipleTokens("solana", addresses);
+        const pairs = await this.getMultipleTokens(chain, addresses);
         for (const pair of pairs) {
           if (!seenAddresses.has(pair.baseToken.address)) {
             seenAddresses.add(pair.baseToken.address);
@@ -395,13 +401,13 @@ export class DexScreenerProvider {
     try {
       const ads = await this.getLatestAds();
       const solanaAds = ads
-        .filter(a => a.chainId === "solana")
+        .filter(a => a.chainId === chain)
         .filter(a => !seenAddresses.has(a.tokenAddress))
         .slice(0, 10);
 
       if (solanaAds.length > 0) {
         const addresses = solanaAds.map(a => a.tokenAddress);
-        const pairs = await this.getMultipleTokens("solana", addresses);
+        const pairs = await this.getMultipleTokens(chain, addresses);
         for (const pair of pairs) {
           if (!seenAddresses.has(pair.baseToken.address)) {
             seenAddresses.add(pair.baseToken.address);
@@ -603,6 +609,7 @@ export class DexScreenerProvider {
       });
 
       signals.push({
+        chain,
         symbol: pair.baseToken.symbol,
         tokenAddress: pair.baseToken.address,
         pairAddress: pair.pairAddress,

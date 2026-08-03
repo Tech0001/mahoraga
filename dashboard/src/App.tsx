@@ -1261,7 +1261,9 @@ export default function App() {
                           onClick={() => window.open(sig.url, '_blank')}
                         >
                           <td className="hud-value-sm py-2 px-2">
-                            <span className="text-hud-warning mr-1">◎</span>
+                            <span className={`mr-1 ${(sig as { chain?: string }).chain === 'robinhood' ? 'text-hud-cyan text-[9px]' : 'text-hud-warning'}`}>
+                              {(sig as { chain?: string }).chain === 'robinhood' ? 'RH' : '◎'}
+                            </span>
                             <span className="font-semibold">{sig.symbol}</span>
                             {sig.tier && (
                               <span className={clsx(
@@ -1377,11 +1379,13 @@ export default function App() {
                               <tr
                                 key={`${trade.tokenAddress}-${trade.exitTime}-${idx}`}
                                 className="border-b border-hud-line/20 hover:bg-hud-line/10 cursor-pointer"
-                                onClick={() => window.open(`https://dexscreener.com/solana/${trade.tokenAddress}`, '_blank')}
+                                onClick={() => window.open(`https://dexscreener.com/${(trade as { chain?: string }).chain ?? 'solana'}/${trade.tokenAddress}`, '_blank')}
                                 title={`Entry: $${trade.entryPrice.toFixed(8)} → Exit: $${trade.exitPrice.toFixed(8)}\nSize: ${trade.entrySol.toFixed(4)} SOL\nP&L: ${trade.pnlSol >= 0 ? '+' : ''}${trade.pnlSol.toFixed(4)} SOL`}
                               >
                                 <td className="hud-value-sm py-2 px-2">
-                                  <span className="text-hud-warning mr-1">◎</span>
+                                  <span className={`mr-1 ${(trade as { chain?: string }).chain === 'robinhood' ? 'text-hud-cyan text-[9px]' : 'text-hud-warning'}`}>
+                                    {(trade as { chain?: string }).chain === 'robinhood' ? 'RH' : '◎'}
+                                  </span>
                                   <span className="font-semibold">{trade.symbol}</span>
                                 </td>
                                 <td className="hud-value-sm py-2 px-2 text-hud-text-dim text-[10px] uppercase tracking-wider">

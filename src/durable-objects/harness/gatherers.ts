@@ -444,7 +444,12 @@ export async function gatherDexMomentum(ctx: HarnessContext): Promise<void> {
   try {
     const dexScreener = createDexScreenerProvider();
 
-    const signals = await dexScreener.findMomentumTokens({
+    // Multi-chain discovery (Director 2026-08-03): scan each enabled chain and
+    // tag signals so per-chain expectancy (Solana memes vs Robinhood memes) is
+    // computable from the trade ledger.
+    const chains = ctx.state.config.dex_chains ?? ["solana"];
+    const findMomentumOptionsFor = (chain: string) => ({
+      chain,
       // Multi-tier system config
       // Micro-spray (30min-2h) [TOGGLE]
       microSprayEnabled: ctx.state.config.dex_microspray_enabled ?? false,
@@ -476,6 +481,18 @@ export async function gatherDexMomentum(ctx: HarnessContext): Promise<void> {
       minVolume24h: ctx.state.config.dex_min_volume_24h,
       minPriceChange24h: ctx.state.config.dex_min_price_change,
     });
+
+    const signals: Awaited<ReturnType<typeof dexScreener.findMomentumTokens>> = [];
+    for (const chain of chains) {
+      try {
+        const chainSignals = await dexScreener.findMomentumTokens(findMomentumOptionsFor(chain));
+        signals.push(...chainSignals);
+      } catch (e) {
+        ctx.log("DexMomentum", "chain_scan_error", { chain, error: String(e).slice(0, 120) });
+      }
+    }
+    // Cross-chain fairness: one ranking by momentum score
+    signals.sort((a, b) => b.momentumScore - a.momentumScore);
 
     // Don't preserve stale signals for open positions.
     // When a token falls off DexScreener trending, the missing signal triggers

@@ -92,6 +92,7 @@ export interface AgentConfig {
   dex_lottery_stagnation_minutes: number; // [TUNE] Lottery flat past N min = dead signal, free the slot (0=off)
   dex_loser_band_pct: number; // [TUNE] Exits within -N%..0 are churn noise, not losses (no loser lockout)
   dex_open_position_alarm_ms: number; // [TUNE] Alarm cadence while DEX positions are open
+  dex_chains: string[]; // Chains to scan ("solana", "robinhood"); per-chain expectancy in ledger
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
@@ -442,6 +443,7 @@ export interface PremarketPlan {
 // ============================================================================
 
 export interface DexPosition {
+  chain?: string; // "solana" default; "robinhood" etc. — per-chain expectancy comparison
   tokenAddress: string;
   symbol: string;
   entryPrice: number;
@@ -471,6 +473,7 @@ export interface DexPortfolioSnapshot {
 }
 
 export interface DexTradeRecord {
+  chain?: string;
   symbol: string;
   tokenAddress: string;
   entryPrice: number;

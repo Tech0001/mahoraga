@@ -25,6 +25,7 @@ export const AgentConfigSchema = z.object({
   dex_lottery_stagnation_minutes: z.number().min(0).max(360),
   dex_loser_band_pct: z.number().min(0).max(30),
   dex_open_position_alarm_ms: z.number().min(2000).max(30000),
+  dex_chains: z.array(z.string().min(1)).min(1).max(10),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

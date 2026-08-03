@@ -27,6 +27,7 @@ function createValidConfig() {
     dex_lottery_stagnation_minutes: 30,
     dex_loser_band_pct: 5,
     dex_open_position_alarm_ms: 5000,
+    dex_chains: ["solana", "robinhood"],
     max_position_value: 5000,
     max_positions: 5,
     min_sentiment_score: 0.3,
