@@ -1,6 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Config } from '../types'
 import { Panel } from './Panel'
+
+interface OpenRouterModel {
+  id: string
+  promptPrice: number
+  completionPrice: number
+}
+
+// Curated fallback shown when the live OpenRouter catalog is unreachable.
+const OPENROUTER_FALLBACK: OpenRouterModel[] = [
+  { id: 'deepseek/deepseek-v4-flash-0731', promptPrice: 0.09, completionPrice: 0.18 },
+  { id: 'deepseek/deepseek-v4-pro', promptPrice: 0.44, completionPrice: 0.87 },
+  { id: 'deepseek/deepseek-chat', promptPrice: 0.26, completionPrice: 1.03 },
+  { id: 'google/gemini-2.5-flash-lite', promptPrice: 0.1, completionPrice: 0.4 },
+  { id: 'google/gemini-2.5-flash', promptPrice: 0.3, completionPrice: 2.5 },
+  { id: 'openai/gpt-4o-mini', promptPrice: 0.15, completionPrice: 0.6 },
+  { id: 'openai/gpt-5.1', promptPrice: 1.25, completionPrice: 10 },
+  { id: 'anthropic/claude-sonnet-4.5', promptPrice: 3, completionPrice: 15 },
+]
 
 interface SettingsModalProps {
   config: Config
@@ -16,6 +34,37 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
   })
   const [saving, setSaving] = useState(false)
   const [apiToken, setApiToken] = useState(localStorage.getItem('mahoraga_api_token') || '')
+  const [orModels, setOrModels] = useState<OpenRouterModel[]>(OPENROUTER_FALLBACK)
+  const [orLive, setOrLive] = useState(false)
+
+  // openai-raw + OPENAI_BASE_URL=openrouter.ai exposes the full OpenRouter
+  // catalog, so the model fields become free text backed by a live datalist.
+  useEffect(() => {
+    let cancelled = false
+    fetch('https://openrouter.ai/api/v1/models')
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data: { data: Array<{ id: string; pricing?: { prompt?: string; completion?: string } }> }) => {
+        if (cancelled) return
+        const models = data.data
+          .filter(m => !m.id.endsWith(':free'))
+          .map(m => ({
+            id: m.id,
+            promptPrice: Number(m.pricing?.prompt ?? 0) * 1e6,
+            completionPrice: Number(m.pricing?.completion ?? 0) * 1e6,
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id))
+        if (models.length > 0) {
+          setOrModels(models)
+          setOrLive(true)
+        }
+      })
+      .catch(() => {
+        // keep fallback list
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Note: We intentionally do NOT sync localConfig with the config prop after initial mount.
   // This prevents the parent's polling (every 5s) from overwriting user's unsaved changes.
@@ -245,7 +294,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                   value={localConfig.llm_provider || 'openai-raw'}
                   onChange={e => handleChange('llm_provider', e.target.value)}
                 >
-                  <option value="openai-raw">OpenAI Direct (default)</option>
+                  <option value="openai-raw">OpenAI-compatible (OpenAI / OpenRouter)</option>
                   <option value="ai-sdk">AI SDK (5 providers)</option>
                   <option value="cloudflare-gateway">Cloudflare AI Gateway</option>
                   {localConfig.llm_provider &&
@@ -255,7 +304,8 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 </select>
                 <p className="text-[9px] text-hud-text-dim mt-1">
                   {localConfig.llm_provider === 'ai-sdk' && 'Supports: OpenAI, Anthropic, Google, xAI, DeepSeek'}
-                  {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') && 'Uses OPENAI_API_KEY directly (+ optional OPENAI_BASE_URL).'}
+                  {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') &&
+                    `Uses OPENAI_API_KEY (+ optional OPENAI_BASE_URL, e.g. OpenRouter). Model fields accept any catalog ID${orLive ? ' — live OpenRouter list loaded' : ''}.`}
                   {localConfig.llm_provider &&
                     !['openai-raw', 'ai-sdk', 'cloudflare-gateway'].includes(localConfig.llm_provider) &&
                     'Provider is configured in the backend; selection is hidden in the dashboard.'}
@@ -264,19 +314,30 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
+              <datalist id="openrouter-model-list">
+                {orModels.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {`$${m.promptPrice.toFixed(2)} in / $${m.completionPrice.toFixed(2)} out per M`}
+                  </option>
+                ))}
+              </datalist>
               <div>
                 <label className="hud-label block mb-1">Research Model (cheap)</label>
+                {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') ? (
+                  <input
+                    type="text"
+                    list="openrouter-model-list"
+                    className="hud-input w-full"
+                    value={localConfig.llm_model}
+                    onChange={e => handleChange('llm_model', e.target.value)}
+                    placeholder="deepseek/deepseek-v4-flash-0731"
+                  />
+                ) : (
                 <select
                   className="hud-input w-full"
                   value={localConfig.llm_model}
                   onChange={e => handleChange('llm_model', e.target.value)}
                 >
-                  {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') && (
-                    <>
-                      <option value="gpt-4o-mini">gpt-4o-mini</option>
-                      <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                    </>
-                  )}
                   {localConfig.llm_provider === 'ai-sdk' && (
                     <>
                       <optgroup label="OpenAI">
@@ -317,21 +378,25 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                       <option value={localConfig.llm_model}>{localConfig.llm_model}</option>
                     )}
                 </select>
+                )}
               </div>
               <div>
                 <label className="hud-label block mb-1">Analyst Model (smart)</label>
+                {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') ? (
+                  <input
+                    type="text"
+                    list="openrouter-model-list"
+                    className="hud-input w-full"
+                    value={localConfig.llm_analyst_model || ''}
+                    onChange={e => handleChange('llm_analyst_model', e.target.value)}
+                    placeholder="deepseek/deepseek-v4-pro"
+                  />
+                ) : (
                 <select
                   className="hud-input w-full"
                   value={localConfig.llm_analyst_model || 'gpt-4o'}
                   onChange={e => handleChange('llm_analyst_model', e.target.value)}
                 >
-                  {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') && (
-                    <>
-                      <option value="gpt-5.2-2025-12-11">GPT-5.2 (best)</option>
-                      <option value="gpt-4o">gpt-4o</option>
-                      <option value="gpt-4o-mini">gpt-4o-mini (cheaper)</option>
-                    </>
-                  )}
                   {localConfig.llm_provider === 'ai-sdk' && (
                     <>
                       <optgroup label="OpenAI">
@@ -386,6 +451,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                       </option>
                     )}
                 </select>
+                )}
               </div>
             </div>
           </div>
