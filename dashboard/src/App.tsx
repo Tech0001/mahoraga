@@ -1396,6 +1396,54 @@ export default function App() {
           </div>
 
           <div className="col-span-4 md:col-span-8 lg:col-span-4">
+            <Panel
+              title="MOMO SCANNER"
+              titleRight={
+                (status?.momoWatchlist?.length || 0) > 0
+                  ? `${status?.momoWatchlist?.length} · ${status?.momoWatchlist?.[0]?.session === 'premarket' ? 'PRE' : 'RTH'}`
+                  : 'IDLE'
+              }
+              className="h-80"
+            >
+              <div className="overflow-y-auto h-full">
+                {(status?.momoWatchlist?.length || 0) === 0 ? (
+                  <div className="text-hud-text-dim text-sm py-4 text-center">
+                    Scanning resumes premarket (TradingView data)
+                  </div>
+                ) : (
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="hud-label">
+                        <th className="pb-1 font-normal">SYM</th>
+                        <th className="pb-1 font-normal text-right">PRICE</th>
+                        <th className="pb-1 font-normal text-right">CHG</th>
+                        <th className="pb-1 font-normal text-right">RVOL</th>
+                        <th className="pb-1 font-normal text-right">VOL</th>
+                        <th className="pb-1 font-normal text-right">FLOAT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(status?.momoWatchlist ?? []).map(c => (
+                        <tr key={c.symbol} className="border-t border-hud-line/20">
+                          <td className="py-1">
+                            <span className="hud-value-sm">{c.symbol}</span>
+                            {c.nearHigh && <span className="text-[8px] text-hud-success ml-1" title="Holding near session high">▲HI</span>}
+                          </td>
+                          <td className="py-1 text-right hud-value-sm">${c.price.toFixed(2)}</td>
+                          <td className="py-1 text-right hud-value-sm text-hud-success">+{c.changePct.toFixed(1)}%</td>
+                          <td className="py-1 text-right hud-value-sm">{c.rvol.toFixed(1)}x</td>
+                          <td className="py-1 text-right hud-value-sm">{c.volume >= 1e6 ? `${(c.volume / 1e6).toFixed(1)}M` : `${(c.volume / 1e3).toFixed(0)}K`}</td>
+                          <td className="py-1 text-right hud-value-sm text-hud-text-dim">{c.floatShares ? `${(c.floatShares / 1e6).toFixed(0)}M` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </Panel>
+          </div>
+
+          <div className="col-span-4 md:col-span-8 lg:col-span-4">
             <Panel title="SIGNAL RESEARCH" titleRight={Object.keys(status?.signalResearch || {}).length.toString()} className="h-80">
               <div className="overflow-y-auto h-full space-y-2">
                 {Object.entries(status?.signalResearch || {}).length === 0 ? (

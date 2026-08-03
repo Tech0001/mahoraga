@@ -129,6 +129,8 @@ export async function handleStatus(ctx: RoutesContext): Promise<Response> {
       twitterConfirmations: ctx.state.twitterConfirmations,
       premarketPlan: ctx.state.premarketPlan,
       stalenessAnalysis: ctx.state.stalenessAnalysis,
+      momoWatchlist: ctx.state.momoWatchlist ?? [],
+      momoWatchlistUpdatedAt: ctx.state.momoWatchlistUpdatedAt ?? 0,
       // DEX positions with live P&L
       dexPositions: dexPositionsWithPnL,
       dexSignals: ctx.state.dexSignals.slice(0, 10), // Top 10 momentum signals

@@ -69,6 +69,16 @@ export interface AgentConfig {
   premarket_plan_window_minutes: number; // [TUNE] Plan when within N minutes of next_open (Alpaca clock)
   market_open_execute_window_minutes: number; // [TUNE] Execute the plan within N minutes after open
 
+  // Momo scanner (TradingView screener data; informational lane, no trading)
+  momo_scanner_enabled: boolean;
+  momo_scan_interval_ms: number; // [TUNE] Politeness floor 15s; unofficial endpoint
+  momo_min_change_pct: number; // [TUNE] Minimum gap/change % to qualify
+  momo_min_rvol: number; // [TUNE] Minimum relative volume vs 10-day
+  momo_min_volume: number; // [TUNE] Minimum session/premarket volume (shares)
+  momo_price_min: number;
+  momo_price_max: number;
+  momo_watchlist_size: number;
+
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
   max_positions: number; // [TUNE] Max concurrent positions
@@ -483,6 +493,10 @@ export interface AgentState {
   lastPremarketPlanDayEt: string | null;
   lastClockIsOpen: boolean | null;
   lastKnownNextOpenMs: number | null;
+  // Momo scanner watchlist (TradingView screener; ranked by score)
+  momoWatchlist: import("../../providers/tradingview").MomoCandidate[];
+  momoWatchlistUpdatedAt: number;
+  lastMomoScanRun: number;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;
   socialSnapshotCacheUpdatedAt: number;
   signalResearch: Record<string, ResearchResult>;

@@ -314,6 +314,28 @@ export class MahoragaHarness extends DurableObject<Env> {
         this.state.lastDataGatherRun = now;
       }
 
+      // Momo watchlist scan (TradingView) — premarket (from ~4:00 ET, i.e.
+      // within 5.5h of next_open) and market hours only; unofficial endpoint,
+      // polled politely on its own interval and never critical-path.
+      const momoEnabled = this.state.config.momo_scanner_enabled ?? true;
+      const momoInterval = Math.max(15_000, this.state.config.momo_scan_interval_ms ?? 60_000);
+      const minutesToOpenForMomo = nextOpenValid ? (nextOpenMs - clockNowMs) / 60000 : Number.POSITIVE_INFINITY;
+      const inPremarket = !clock.is_open && minutesToOpenForMomo > 0 && minutesToOpenForMomo <= 330;
+      if (
+        momoEnabled &&
+        alpacaAvailable &&
+        (clock.is_open || inPremarket) &&
+        now - (this.state.lastMomoScanRun ?? 0) >= momoInterval
+      ) {
+        this.log("System", "phase_start", { phase: "momo_scan" });
+        try {
+          await gatherers.gatherMomoWatchlist(this.getContext(), inPremarket);
+        } catch (e) {
+          this.log("System", "phase_error", { phase: "momo_scan", error: String(e).slice(0, 160) });
+        }
+        this.state.lastMomoScanRun = now;
+      }
+
       if (now - this.state.lastResearchRun >= RESEARCH_INTERVAL_MS) {
         this.log("System", "phase_start", { phase: "llm_research" });
         try {

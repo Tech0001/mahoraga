@@ -18,6 +18,7 @@ import {
 } from "./utils";
 import { createAlpacaProviders } from "../../providers/alpaca";
 import { createDexScreenerProvider } from "../../providers/dexscreener";
+import { scanMomoCandidates } from "../../providers/tradingview";
 
 /**
  * Helper function for sleeping (used for rate limiting).
@@ -184,6 +185,35 @@ export function getSocialSnapshotCache(ctx: HarnessContext): Record<string, Soci
     out[symbol] = { volume: s.volume, sentiment: s.sentiment, sources: Array.from(s.sources) };
   }
   return out;
+}
+
+/**
+ * Refresh the momo watchlist from the TradingView screener. Informational
+ * lane: ranked candidates land in state for the dashboard, premarket plan,
+ * and the future opening-drive module — no trading decisions made here.
+ */
+export async function gatherMomoWatchlist(ctx: HarnessContext, premarket: boolean): Promise<void> {
+  const cfg = ctx.state.config;
+  const candidates = await scanMomoCandidates({
+    premarket,
+    minChangePct: cfg.momo_min_change_pct ?? 4,
+    minRvol: cfg.momo_min_rvol ?? 2,
+    minVolume: cfg.momo_min_volume ?? 300_000,
+    priceMin: cfg.momo_price_min ?? 2,
+    priceMax: cfg.momo_price_max ?? 60,
+    limit: cfg.momo_watchlist_size ?? 12,
+  });
+
+  ctx.state.momoWatchlist = candidates;
+  ctx.state.momoWatchlistUpdatedAt = Date.now();
+  ctx.log("MomoScanner", "momo_watchlist", {
+    session: premarket ? "premarket" : "regular",
+    count: candidates.length,
+    top3: candidates
+      .slice(0, 3)
+      .map(c => `${c.symbol} +${c.changePct.toFixed(1)}% rvol ${c.rvol.toFixed(1)}x`)
+      .join(", "),
+  });
 }
 
 /**

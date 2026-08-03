@@ -367,6 +367,19 @@ export interface PositionHistory {
   timestamps: number[]
 }
 
+export interface MomoCandidate {
+  symbol: string
+  exchange: string
+  price: number
+  changePct: number
+  volume: number
+  rvol: number
+  floatShares: number | null
+  nearHigh: boolean
+  score: number
+  session: 'premarket' | 'regular'
+}
+
 export interface Status {
   account: Account | null
   positions: Position[]
@@ -385,6 +398,8 @@ export interface Status {
   twitterConfirmations?: Record<string, TwitterConfirmation>
   premarketPlan?: PremarketPlan | null
   stalenessAnalysis?: Record<string, StalenessAnalysis>
+  momoWatchlist?: MomoCandidate[]
+  momoWatchlistUpdatedAt?: number
   overnightActivity?: OvernightActivity
   // DEX momentum trading
   dexPositions?: DexPosition[]
