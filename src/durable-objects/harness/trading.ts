@@ -18,6 +18,7 @@ import {
   isTwitterEnabled,
   gatherTwitterConfirmation,
 } from "./twitter";
+import { getSocialSnapshotCache } from "./gatherers";
 import { sendTradeAlert } from "./notifications";
 
 // ============================================================================
@@ -392,9 +393,11 @@ export async function runAnalyst(
       continue;
     }
 
-    // Check staleness
+    // Check staleness using the aggregated cross-source social volume (a
+    // hardcoded 0 here made every position read as fully volume-decayed).
     if (ctx.state.config.stale_position_enabled) {
-      const stalenessResult = analyzeStaleness(ctx, pos.symbol, pos.current_price, 0);
+      const currentSocialVolume = getSocialSnapshotCache(ctx)[pos.symbol]?.volume ?? 0;
+      const stalenessResult = analyzeStaleness(ctx, pos.symbol, pos.current_price, currentSocialVolume);
       ctx.state.stalenessAnalysis[pos.symbol] = stalenessResult;
 
       if (stalenessResult.isStale) {
@@ -453,16 +456,17 @@ export async function runAnalyst(
       const result = await executeBuy(ctx, alpaca, research.symbol, finalConfidence, account);
       if (result) {
         heldSymbols.add(research.symbol);
+        const aggregatedSocial = getSocialSnapshotCache(ctx)[research.symbol];
         ctx.state.positionEntries[research.symbol] = {
           symbol: research.symbol,
           entry_time: Date.now(),
           entry_price: 0,
-          entry_sentiment: originalSignal?.sentiment || finalConfidence,
-          entry_social_volume: originalSignal?.volume || 0,
-          entry_sources: originalSignal?.subreddits || [originalSignal?.source || "research"],
+          entry_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? finalConfidence,
+          entry_social_volume: aggregatedSocial?.volume ?? originalSignal?.volume ?? 0,
+          entry_sources: aggregatedSocial?.sources ?? originalSignal?.subreddits ?? [originalSignal?.source || "research"],
           entry_reason: research.reasoning,
           peak_price: 0,
-          peak_sentiment: originalSignal?.sentiment || finalConfidence,
+          peak_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? finalConfidence,
         };
       }
     }
@@ -505,16 +509,17 @@ export async function runAnalyst(
         if (result) {
           const originalSignal = ctx.state.signalCache.find(s => s.symbol === rec.symbol);
           heldSymbols.add(rec.symbol);
+          const aggregatedSocial = getSocialSnapshotCache(ctx)[rec.symbol];
           ctx.state.positionEntries[rec.symbol] = {
             symbol: rec.symbol,
             entry_time: Date.now(),
             entry_price: 0,
-            entry_sentiment: originalSignal?.sentiment || rec.confidence,
-            entry_social_volume: originalSignal?.volume || 0,
-            entry_sources: originalSignal?.subreddits || [originalSignal?.source || "analyst"],
+            entry_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? rec.confidence,
+            entry_social_volume: aggregatedSocial?.volume ?? originalSignal?.volume ?? 0,
+            entry_sources: aggregatedSocial?.sources ?? originalSignal?.subreddits ?? [originalSignal?.source || "analyst"],
             entry_reason: rec.reasoning,
             peak_price: 0,
-            peak_sentiment: originalSignal?.sentiment || rec.confidence,
+            peak_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? rec.confidence,
           };
         }
       }

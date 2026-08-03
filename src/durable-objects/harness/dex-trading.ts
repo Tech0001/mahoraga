@@ -1038,6 +1038,34 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
   }
   const candidateConfirmMs = 45_000;
 
+  // Blocked-candidate outcome tracking: settle the "does the overextension cap
+  // reject winners?" question with tape. Evaluated before gates so outcomes
+  // are recorded even while a token keeps getting blocked.
+  if (ctx.state.dexBlockedCandidates) {
+    const nowBlk = Date.now();
+    for (const [addr, rec] of Object.entries(ctx.state.dexBlockedCandidates)) {
+      if (nowBlk - rec.blockedAt > 24 * 60 * 60 * 1000) {
+        delete ctx.state.dexBlockedCandidates[addr];
+        continue;
+      }
+      if (rec.outcomeLogged) continue;
+      const cand = candidates.find(c => c.tokenAddress === addr);
+      if (!cand || !(rec.blockPrice > 0)) continue;
+      const ratio = cand.priceUsd / rec.blockPrice;
+      if (ratio >= 1.5 || ratio <= 0.5) {
+        rec.outcomeLogged = true;
+        ctx.log("DexMomentum", ratio >= 1.5 ? "blocked_runner" : "blocked_dump", {
+          symbol: rec.symbol,
+          blockPrice: rec.blockPrice.toExponential(3),
+          nowPrice: cand.priceUsd.toExponential(3),
+          changeSinceBlock: ((ratio - 1) * 100).toFixed(0) + "%",
+          minutesSinceBlock: Math.round((nowBlk - rec.blockedAt) / 60000),
+          blockPriceChange1h: rec.priceChange1h.toFixed(0) + "%",
+        });
+      }
+    }
+  }
+
   for (const candidate of candidates) {
     if (Object.keys(ctx.state.dexPositions).length >= ctx.state.config.dex_max_positions) break;
 
@@ -1100,6 +1128,17 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         priceChange1h: (candidate.priceChange1h ?? 0).toFixed(0) + "%",
         cap: maxEntry1h + "%",
       });
+      // Keep the FIRST block price: the counterfactual is "what if we had
+      // bought when the cap first said no".
+      if (!ctx.state.dexBlockedCandidates) ctx.state.dexBlockedCandidates = {};
+      if (!ctx.state.dexBlockedCandidates[candidate.tokenAddress] && candidate.priceUsd > 0) {
+        ctx.state.dexBlockedCandidates[candidate.tokenAddress] = {
+          symbol: candidate.symbol,
+          blockPrice: candidate.priceUsd,
+          priceChange1h: candidate.priceChange1h ?? 0,
+          blockedAt: Date.now(),
+        };
+      }
       continue;
     }
 

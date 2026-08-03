@@ -3,6 +3,8 @@ import { z } from "zod";
 export const AgentConfigSchema = z.object({
   data_poll_interval_ms: z.number().min(5000).max(300000),
   analyst_interval_ms: z.number().min(30000).max(600000),
+  premarket_plan_window_minutes: z.number().min(1).max(60),
+  market_open_execute_window_minutes: z.number().min(0).max(10),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

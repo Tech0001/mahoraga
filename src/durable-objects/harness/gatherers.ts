@@ -6,7 +6,7 @@
  */
 
 import type { HarnessContext } from "./context";
-import type { Signal } from "./types";
+import type { Signal, SocialHistoryEntry, SocialSnapshotCacheEntry } from "./types";
 import { SOURCE_CONFIG } from "./types";
 import {
   calculateTimeDecay,
@@ -47,8 +47,24 @@ export async function runDataGatherers(ctx: HarnessContext): Promise<void> {
   const MAX_AGE_MS = 24 * 60 * 60 * 1000;
   const now = Date.now();
 
-  const freshSignals = allSignals
-    .filter(s => now - s.timestamp < MAX_AGE_MS)
+  const eligibleSignals = allSignals.filter(s => now - s.timestamp < MAX_AGE_MS);
+
+  // Aggregate social volume/sentiment per symbol BEFORE the top-N slice so
+  // staleness exits and entry records see the full cross-source picture.
+  const socialSnapshot = buildSocialSnapshot(eligibleSignals);
+  updateSocialHistoryFromSnapshot(ctx, socialSnapshot, now);
+  ctx.state.socialSnapshotCache = {};
+  for (const [symbol, s] of socialSnapshot) {
+    ctx.state.socialSnapshotCache[symbol] = {
+      volume: s.volume,
+      sentiment: s.sentiment,
+      sources: Array.from(s.sources),
+    };
+  }
+  ctx.state.socialSnapshotCacheUpdatedAt = now;
+
+  const freshSignals = eligibleSignals
+    .slice()
     .sort((a, b) => Math.abs(b.sentiment) - Math.abs(a.sentiment))
     .slice(0, MAX_SIGNALS);
 
@@ -60,6 +76,114 @@ export async function runDataGatherers(ctx: HarnessContext): Promise<void> {
     crypto: cryptoSignals.length,
     total: ctx.state.signalCache.length,
   });
+}
+
+/**
+ * Aggregate signals into per-symbol social volume / volume-weighted sentiment.
+ * Ported from upstream ygwyg/MAHORAGA PR #27 (social staleness v2).
+ */
+export function buildSocialSnapshot(
+  signals: Signal[]
+): Map<string, { volume: number; sentiment: number; sources: Set<string> }> {
+  const aggregated = new Map<string, { volume: number; sentimentNumerator: number; sources: Set<string> }>();
+
+  for (const sig of signals) {
+    if (!sig.symbol) continue;
+    const volume = Number.isFinite(sig.volume) && sig.volume > 0 ? sig.volume : 1;
+
+    let entry = aggregated.get(sig.symbol);
+    if (!entry) {
+      entry = { volume: 0, sentimentNumerator: 0, sources: new Set() };
+      aggregated.set(sig.symbol, entry);
+    }
+    entry.volume += volume;
+    entry.sentimentNumerator += (Number.isFinite(sig.sentiment) ? sig.sentiment : 0) * volume;
+    entry.sources.add(sig.source_detail || sig.source);
+  }
+
+  const out = new Map<string, { volume: number; sentiment: number; sources: Set<string> }>();
+  for (const [symbol, entry] of aggregated) {
+    out.set(symbol, {
+      volume: entry.volume,
+      sentiment: entry.volume > 0 ? entry.sentimentNumerator / entry.volume : 0,
+      sources: entry.sources,
+    });
+  }
+  return out;
+}
+
+function pruneSocialHistoryInPlace(history: SocialHistoryEntry[], cutoffMs: number): void {
+  if (history.length === 0) return;
+  const pruned = history.filter(entry => entry.timestamp >= cutoffMs);
+  pruned.sort((a, b) => a.timestamp - b.timestamp);
+  history.splice(0, history.length, ...pruned);
+}
+
+/**
+ * Fold a snapshot into per-symbol history: 5-minute buckets, 24h retention.
+ * Untouched symbols still get pruned so history cannot grow unbounded.
+ */
+export function updateSocialHistoryFromSnapshot(
+  ctx: HarnessContext,
+  snapshot: Map<string, { volume: number; sentiment: number; sources: Set<string> }>,
+  nowMs: number
+): void {
+  const SOCIAL_HISTORY_BUCKET_MS = 5 * 60 * 1000;
+  const SOCIAL_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const cutoff = nowMs - SOCIAL_HISTORY_MAX_AGE_MS;
+
+  const touchedSymbols = new Set<string>();
+  for (const [symbol, s] of snapshot) {
+    touchedSymbols.add(symbol);
+    const history = ctx.state.socialHistory[symbol] ?? [];
+    if (history.length > 1) history.sort((a, b) => a.timestamp - b.timestamp);
+    const last = history[history.length - 1];
+
+    if (last && nowMs - last.timestamp < SOCIAL_HISTORY_BUCKET_MS) {
+      last.timestamp = nowMs;
+      last.volume = s.volume;
+      last.sentiment = s.sentiment;
+    } else {
+      history.push({ timestamp: nowMs, volume: s.volume, sentiment: s.sentiment });
+    }
+
+    pruneSocialHistoryInPlace(history, cutoff);
+    if (history.length === 0) {
+      delete ctx.state.socialHistory[symbol];
+    } else {
+      ctx.state.socialHistory[symbol] = history;
+    }
+  }
+
+  for (const symbol of Object.keys(ctx.state.socialHistory)) {
+    if (touchedSymbols.has(symbol)) continue;
+    const history = ctx.state.socialHistory[symbol];
+    if (!history || history.length === 0) {
+      delete ctx.state.socialHistory[symbol];
+      continue;
+    }
+    pruneSocialHistoryInPlace(history, cutoff);
+    if (history.length === 0) {
+      delete ctx.state.socialHistory[symbol];
+    }
+  }
+}
+
+/**
+ * Read the aggregated social snapshot, rebuilding from the signal cache if a
+ * gather pass has not populated it yet (e.g. cold start).
+ */
+export function getSocialSnapshotCache(ctx: HarnessContext): Record<string, SocialSnapshotCacheEntry> {
+  if (ctx.state.socialSnapshotCacheUpdatedAt > 0) {
+    return ctx.state.socialSnapshotCache;
+  }
+
+  const fallback = buildSocialSnapshot(ctx.state.signalCache);
+  const out: Record<string, SocialSnapshotCacheEntry> = {};
+  for (const [symbol, s] of fallback) {
+    out[symbol] = { volume: s.volume, sentiment: s.sentiment, sources: Array.from(s.sources) };
+  }
+  return out;
 }
 
 /**

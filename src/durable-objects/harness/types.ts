@@ -66,6 +66,8 @@ export interface AgentConfig {
   // Polling intervals - how often the agent checks for new data
   data_poll_interval_ms: number; // [TUNE] Default: 30s. Lower = more API calls
   analyst_interval_ms: number; // [TUNE] Default: 120s. How often to run trading logic
+  premarket_plan_window_minutes: number; // [TUNE] Plan when within N minutes of next_open (Alpaca clock)
+  market_open_execute_window_minutes: number; // [TUNE] Execute the plan within N minutes after open
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
@@ -328,6 +330,12 @@ export interface SocialHistoryEntry {
   sentiment: number;
 }
 
+export interface SocialSnapshotCacheEntry {
+  volume: number;
+  sentiment: number;
+  sources: string[];
+}
+
 export interface LogEntry {
   timestamp: string;
   agent: string;
@@ -470,6 +478,13 @@ export interface AgentState {
   lastDataGatherRun: number;
   lastAnalystRun: number;
   lastResearchRun: number;
+  lastPositionResearchRun: number;
+  // Market-timing state driven by the Alpaca clock (null = never observed).
+  lastPremarketPlanDayEt: string | null;
+  lastClockIsOpen: boolean | null;
+  lastKnownNextOpenMs: number | null;
+  socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;
+  socialSnapshotCacheUpdatedAt: number;
   signalResearch: Record<string, ResearchResult>;
   positionResearch: Record<string, unknown>;
   stalenessAnalysis: Record<string, unknown>;
@@ -530,6 +545,19 @@ export interface AgentState {
   // token to have persisted across scans (rug guard: SPIDERCAT passed the
   // liquidity floor and went -98.7% eleven seconds after entry).
   dexCandidateFirstSeen?: Record<string, number>;
+  // Counterfactual tracking for the overextension cap: price at first block,
+  // so later scans can answer "did we reject a winner (blocked_runner) or
+  // dodge a dump (blocked_dump)?" with tape. Pruned after 24h.
+  dexBlockedCandidates?: Record<
+    string,
+    {
+      symbol: string;
+      blockPrice: number;
+      priceChange1h: number;
+      blockedAt: number;
+      outcomeLogged?: boolean;
+    }
+  >;
   // Crisis Mode state
   crisisState: CrisisState;
   lastCrisisCheck: number;

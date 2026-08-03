@@ -5,6 +5,8 @@ function createValidConfig() {
   return {
     data_poll_interval_ms: 30000,
     analyst_interval_ms: 120000,
+    premarket_plan_window_minutes: 5,
+    market_open_execute_window_minutes: 2,
     max_position_value: 5000,
     max_positions: 5,
     min_sentiment_score: 0.3,
@@ -78,6 +80,16 @@ describe("AgentConfigSchema", () => {
   });
 
   describe("invalid configurations", () => {
+    it("rejects premarket_plan_window_minutes outside 1-60", () => {
+      expect(AgentConfigSchema.safeParse({ ...createValidConfig(), premarket_plan_window_minutes: 0 }).success).toBe(false);
+      expect(AgentConfigSchema.safeParse({ ...createValidConfig(), premarket_plan_window_minutes: 61 }).success).toBe(false);
+    });
+
+    it("rejects market_open_execute_window_minutes outside 0-10", () => {
+      expect(AgentConfigSchema.safeParse({ ...createValidConfig(), market_open_execute_window_minutes: -1 }).success).toBe(false);
+      expect(AgentConfigSchema.safeParse({ ...createValidConfig(), market_open_execute_window_minutes: 11 }).success).toBe(false);
+    });
+
     it("rejects negative max_position_value", () => {
       const config = { ...createValidConfig(), max_position_value: -1000 };
       const result = AgentConfigSchema.safeParse(config);

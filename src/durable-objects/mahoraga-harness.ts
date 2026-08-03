@@ -78,6 +78,7 @@ export type { AgentConfig, AgentState, DexPosition, Signal };
 export class MahoragaHarness extends DurableObject<Env> {
   private state: AgentState = { ...DEFAULT_STATE };
   private _llm: LLMProvider | null = null;
+  private _etDayFormatter: Intl.DateTimeFormat | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -224,6 +225,18 @@ export class MahoragaHarness extends DurableObject<Env> {
         }
       }
 
+      // Market-day math from the broker clock (not server-local time), so
+      // premarket behavior stays correct across timezones, holidays, restarts.
+      const clockNowMs = Number.isFinite(new Date(clock.timestamp).getTime())
+        ? new Date(clock.timestamp).getTime()
+        : now;
+      const etDay = this.getEtDayString(clockNowMs);
+      const nextOpenMs = new Date(clock.next_open).getTime();
+      const nextOpenValid = Number.isFinite(nextOpenMs);
+      if (alpacaAvailable && !clock.is_open && nextOpenValid) {
+        this.state.lastKnownNextOpenMs = nextOpenMs;
+      }
+
       // Heartbeat log - shows what will run this cycle
       const willGatherData = now - this.state.lastDataGatherRun >= this.state.config.data_poll_interval_ms;
       const willResearch = now - this.state.lastResearchRun >= RESEARCH_INTERVAL_MS;
@@ -311,11 +324,30 @@ export class MahoragaHarness extends DurableObject<Env> {
         this.state.lastResearchRun = now;
       }
 
-      if (this.isPreMarketWindow() && !this.state.premarketPlan) {
-        try {
-          await this.runPreMarketAnalysis();
-        } catch (e) {
-          this.log("System", "phase_error", { phase: "premarket", error: String(e).slice(0, 160) });
+      // Clear a premarket plan left over from a previous market day.
+      if (this.state.premarketPlan && this.state.lastPremarketPlanDayEt && this.state.lastPremarketPlanDayEt !== etDay) {
+        this.log("System", "clearing_stale_premarket_plan", {
+          stale_day: this.state.lastPremarketPlanDayEt,
+          current_day: etDay,
+        });
+        this.state.premarketPlan = null;
+        this.state.lastPremarketPlanDayEt = null;
+      }
+
+      const premarketPlanWindowMinutes = Math.max(1, this.state.config.premarket_plan_window_minutes ?? 5);
+      if (alpacaAvailable && !clock.is_open && !this.state.premarketPlan) {
+        const minutesToOpen = nextOpenValid ? (nextOpenMs - clockNowMs) / 60000 : Number.POSITIVE_INFINITY;
+        const shouldPlan =
+          minutesToOpen > 0 &&
+          minutesToOpen <= premarketPlanWindowMinutes &&
+          this.state.lastPremarketPlanDayEt !== etDay;
+        if (shouldPlan) {
+          try {
+            await this.runPreMarketAnalysis();
+          } catch (e) {
+            this.log("System", "phase_error", { phase: "premarket", error: String(e).slice(0, 160) });
+          }
+          if (this.state.premarketPlan) this.state.lastPremarketPlanDayEt = etDay;
         }
       }
 
@@ -326,7 +358,20 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
 
       if (clock.is_open) {
-        if (this.isMarketJustOpened() && this.state.premarketPlan) {
+        const marketOpenExecuteWindowMinutes = Math.max(0, this.state.config.market_open_execute_window_minutes ?? 2);
+        const lastKnownOpenMs = this.state.lastKnownNextOpenMs;
+        const hasOpenMs = lastKnownOpenMs != null && Number.isFinite(lastKnownOpenMs);
+        const openWindowMs = marketOpenExecuteWindowMinutes * 60_000;
+        const withinOpenWindow =
+          lastKnownOpenMs != null && clockNowMs >= lastKnownOpenMs && clockNowMs - lastKnownOpenMs <= openWindowMs;
+        const clockStateUnknown = this.state.lastClockIsOpen == null;
+        const marketJustOpened = this.state.lastClockIsOpen === false && clock.is_open;
+        // Execute just after the bell. On cold start (prior clock state unknown)
+        // allow a single attempt; plan staleness prevents late execution.
+        const shouldExecutePremarketPlan =
+          !!this.state.premarketPlan &&
+          ((hasOpenMs && withinOpenWindow) || marketJustOpened || (!hasOpenMs && clockStateUnknown));
+        if (shouldExecutePremarketPlan) {
           await this.executePremarketPlan();
         }
 
@@ -336,12 +381,13 @@ export class MahoragaHarness extends DurableObject<Env> {
           this.state.lastAnalystRun = now;
         }
 
-        if (positions.length > 0 && now - this.state.lastResearchRun >= POSITION_RESEARCH_INTERVAL_MS) {
+        if (positions.length > 0 && now - this.state.lastPositionResearchRun >= POSITION_RESEARCH_INTERVAL_MS) {
           for (const pos of positions) {
             if (pos.asset_class !== "us_option") {
               await llmResearch.researchPosition(this.getContext(), pos.symbol, pos);
             }
           }
+          this.state.lastPositionResearchRun = now;
         }
 
         if (options.isOptionsEnabled(this.getContext())) {
@@ -363,6 +409,10 @@ export class MahoragaHarness extends DurableObject<Env> {
             }
           }
         }
+      }
+
+      if (alpacaAvailable) {
+        this.state.lastClockIsOpen = clock.is_open;
       }
 
       await this.persist();
@@ -747,36 +797,38 @@ export class MahoragaHarness extends DurableObject<Env> {
   // Runs 9:25-9:29 AM ET to prepare a trading plan before market open.
   // Executes the plan at 9:30-9:32 AM when market opens.
   //
-  // [TUNE] Change time windows in isPreMarketWindow() / isMarketJustOpened()
+  // [TUNE] premarket_plan_window_minutes / market_open_execute_window_minutes in config
   // [TUNE] Plan staleness (PLAN_STALE_MS) in executePremarketPlan()
   // ============================================================================
 
-  private isPreMarketWindow(): boolean {
-    const now = new Date();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const day = now.getDay();
-
-    if (day >= 1 && day <= 5) {
-      if (hour === 9 && minute >= 25 && minute <= 29) {
-        return true;
+  private getEtDayString(epochMs: number): string {
+    if (!this._etDayFormatter) {
+      try {
+        this._etDayFormatter = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/New_York",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+      } catch {
+        this._etDayFormatter = null;
       }
     }
-    return false;
-  }
 
-  private isMarketJustOpened(): boolean {
-    const now = new Date();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const day = now.getDay();
-
-    if (day >= 1 && day <= 5) {
-      if (hour === 9 && minute >= 30 && minute <= 32) {
-        return true;
-      }
+    if (!this._etDayFormatter) {
+      return new Date(epochMs).toISOString().slice(0, 10);
     }
-    return false;
+
+    try {
+      const parts = this._etDayFormatter.formatToParts(new Date(epochMs));
+      const year = parts.find((p) => p.type === "year")?.value;
+      const month = parts.find((p) => p.type === "month")?.value;
+      const day = parts.find((p) => p.type === "day")?.value;
+      if (year && month && day) return `${year}-${month}-${day}`;
+    } catch {
+      // fall through
+    }
+    return new Date(epochMs).toISOString().slice(0, 10);
   }
 
   private async runPreMarketAnalysis(): Promise<void> {
@@ -858,16 +910,17 @@ export class MahoragaHarness extends DurableObject<Env> {
           heldSymbols.add(rec.symbol);
 
           const originalSignal = this.state.signalCache.find(s => s.symbol === rec.symbol);
+          const aggregatedSocial = gatherers.getSocialSnapshotCache(this.getContext())[rec.symbol];
           this.state.positionEntries[rec.symbol] = {
             symbol: rec.symbol,
             entry_time: Date.now(),
             entry_price: 0,
-            entry_sentiment: originalSignal?.sentiment || 0,
-            entry_social_volume: originalSignal?.volume || 0,
-            entry_sources: originalSignal?.subreddits || [originalSignal?.source || "premarket"],
+            entry_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? 0,
+            entry_social_volume: aggregatedSocial?.volume ?? originalSignal?.volume ?? 0,
+            entry_sources: aggregatedSocial?.sources ?? originalSignal?.subreddits ?? [originalSignal?.source || "premarket"],
             entry_reason: rec.reasoning,
             peak_price: 0,
-            peak_sentiment: originalSignal?.sentiment || 0,
+            peak_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? 0,
           };
         }
       }
