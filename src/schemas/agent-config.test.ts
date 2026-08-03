@@ -24,6 +24,7 @@ function createValidConfig() {
     momentum_news_scalp_enabled: true,
     momentum_news_scalp_hold_seconds: 15,
     momentum_news_scalp_min_gap_pct: 10,
+    dex_lottery_stagnation_minutes: 30,
     max_position_value: 5000,
     max_positions: 5,
     min_sentiment_score: 0.3,

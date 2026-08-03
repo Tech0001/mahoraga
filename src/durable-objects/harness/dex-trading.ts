@@ -126,7 +126,29 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     }
 
     let shouldExit = false;
-    let exitReason: "take_profit" | "stop_loss" | "lost_momentum" | "trailing_stop" | "breakeven_stop" | "scaling_trailing" = "take_profit";
+    let exitReason: "take_profit" | "stop_loss" | "lost_momentum" | "trailing_stop" | "breakeven_stop" | "scaling_trailing" | "stagnation" = "take_profit";
+
+    // Lottery stagnation exit (journal entry 27): every lottery winner in the
+    // 42-trade sample resolved within 20 minutes; the longest lottery holds
+    // were a -30.7% bleed (34min) and a dead slot (25min). If a ticket has
+    // not reached the trailing-activation zone after N minutes, the signal
+    // is dead — exit and free the slot. Established/early tiers untouched
+    // (their winners are slow grinders: 69min, 381min).
+    const stagnationMinutes = ctx.state.config.dex_lottery_stagnation_minutes ?? 30;
+    if (stagnationMinutes > 0 && position.tier === "lottery") {
+      const heldMin = (Date.now() - position.entryTime) / 60_000;
+      const activationPct = ctx.state.config.dex_scaling_trailing_activation_pct ?? 10;
+      if (heldMin >= stagnationMinutes && plPct < activationPct) {
+        shouldExit = true;
+        exitReason = "stagnation";
+        ctx.log("DexMomentum", "stagnation_exit", {
+          symbol: position.symbol,
+          heldMin: Math.round(heldMin),
+          plPct: plPct.toFixed(1) + "%",
+          reason: `lottery ticket flat for ${Math.round(heldMin)}min - signal dead, freeing slot`,
+        });
+      }
+    }
 
     // Task #13: Check liquidity safety before any exit
     // If liquidity is too low relative to position size, we might get stuck
@@ -900,13 +922,9 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     // Block re-entry if token has lost too many times consecutively
     const maxConsecutiveLosses = ctx.state.config.dex_max_consecutive_losses ?? 2;
     if (cooldown.consecutiveLosses >= maxConsecutiveLosses) {
-      ctx.log("DexMomentum", "cooldown_blocked_consecutive_losses", {
-        symbol: s.symbol,
-        consecutiveLosses: cooldown.consecutiveLosses,
-        maxAllowed: maxConsecutiveLosses,
-        reason: "Token has lost too many times consecutively - blocked until time expires",
-      });
-      // Only allow re-entry after full cooldown expires
+      // Expiry check FIRST so the tape only shows "blocked" when actually
+      // blocking (a blocked-then-cleared pair in the same scan poisoned
+      // gate-hit-rate analysis, journal entry 27).
       if (Date.now() >= cooldown.fallbackExpiry) {
         ctx.log("DexMomentum", "cooldown_cleared_after_losses", {
           symbol: s.symbol,
@@ -916,6 +934,12 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         cooldown.clearedAt = Date.now(); // preserve loss counters across re-entries
         return s;
       }
+      ctx.log("DexMomentum", "cooldown_blocked_consecutive_losses", {
+        symbol: s.symbol,
+        consecutiveLosses: cooldown.consecutiveLosses,
+        maxAllowed: maxConsecutiveLosses,
+        reason: "Token has lost too many times consecutively - blocked until time expires",
+      });
       return null;
     }
 

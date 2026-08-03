@@ -89,6 +89,7 @@ export interface AgentConfig {
   momentum_news_scalp_enabled: boolean; // A-catalyst open scalp play
   momentum_news_scalp_hold_seconds: number; // [TUNE] Sell into the open rush after N seconds
   momentum_news_scalp_min_gap_pct: number; // [TUNE] Minimum premarket gap to scalp
+  dex_lottery_stagnation_minutes: number; // [TUNE] Lottery flat past N min = dead signal, free the slot (0=off)
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
@@ -487,7 +488,8 @@ export interface DexTradeRecord {
     | "scaling_trailing"
     | "distribution_exit"
     | "resistance_exit"
-    | "liquidity_exit";
+    | "liquidity_exit"
+    | "stagnation";
   tier?: "microspray" | "breakout" | "lottery" | "early" | "established";
   // Entry-moment snapshot (copied from the position at exit)
   entryMomentumScore?: number;
