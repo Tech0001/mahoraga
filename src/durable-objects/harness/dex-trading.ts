@@ -1242,34 +1242,45 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     // (FLAG/VWAP_HOLD). Fail-open when candles are unavailable (young pools
     // may not be indexed yet) so Solana pump.fun flow keeps its old behavior.
     if (ctx.state.config.dex_structure_gate_enabled ?? true) {
+      const isBuildable = (setup: string) => setup === "RECLAIM" || setup === "FLAG" || setup === "VWAP_HOLD";
+      let gateRead: import("./chart-structure").ChartRead | null = null;
       try {
         const gecko = createGeckoTerminalProvider();
         const bars = await gecko.getMinuteBars(candidate.chain ?? "solana", candidate.pairAddress, 120);
         if (bars.length >= 15) {
-          const read = readChart(bars, null);
-          if (read) {
+          gateRead = readChart(bars, null);
+          if (gateRead) {
             if (!ctx.state.dexCharts) ctx.state.dexCharts = {};
-            ctx.state.dexCharts[candidate.tokenAddress] = read;
-            const buildable = read.setup === "RECLAIM" || read.setup === "FLAG" || read.setup === "VWAP_HOLD";
-            if (!buildable) {
-              ctx.log("DexMomentum", "entry_blocked_structure", {
-                symbol: candidate.symbol,
-                chain: candidate.chain,
-                setup: read.setup,
-                vwapDistPct: read.distFromVwapPct.toFixed(1),
-                note: read.note.slice(0, 90),
-              });
-              continue;
-            }
-            ctx.log("DexMomentum", "entry_structure_ok", {
-              symbol: candidate.symbol,
-              setup: read.setup,
-              note: read.note.slice(0, 90),
-            });
+            ctx.state.dexCharts[candidate.tokenAddress] = gateRead;
           }
         }
       } catch (e) {
         ctx.log("DexMomentum", "structure_gate_error", { symbol: candidate.symbol, error: String(e).slice(0, 100) });
+      }
+      // Sticky decisions: a transient candle-fetch failure (throttle, API
+      // hiccup) must not overturn a fresh negative read — RAGECAT was blocked
+      // FADING and bought 31s later through exactly that hole (21:09,
+      // journal entry 36). Fail open ONLY when no recent read exists at all.
+      if (!gateRead) {
+        const cached = ctx.state.dexCharts?.[candidate.tokenAddress];
+        if (cached && Date.now() - cached.asOf < 180_000) gateRead = cached;
+      }
+      if (gateRead) {
+        if (!isBuildable(gateRead.setup)) {
+          ctx.log("DexMomentum", "entry_blocked_structure", {
+            symbol: candidate.symbol,
+            chain: candidate.chain,
+            setup: gateRead.setup,
+            vwapDistPct: gateRead.distFromVwapPct.toFixed(1),
+            note: gateRead.note.slice(0, 90),
+          });
+          continue;
+        }
+        ctx.log("DexMomentum", "entry_structure_ok", {
+          symbol: candidate.symbol,
+          setup: gateRead.setup,
+          note: gateRead.note.slice(0, 90),
+        });
       }
     }
 
