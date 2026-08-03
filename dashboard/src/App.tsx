@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { Fragment, useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import clsx from 'clsx'
 import { Panel } from './components/Panel'
@@ -160,6 +160,7 @@ export default function App() {
   const [showSetup, setShowSetup] = useState(false)
   const [setupChecked, setSetupChecked] = useState(false)
   const [time, setTime] = useState(new Date())
+  const [expandedMomo, setExpandedMomo] = useState<string | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark'
@@ -1062,21 +1063,26 @@ export default function App() {
                     </thead>
                     <tbody>
                       {(status?.momoWatchlist ?? []).map(c => (
+                        <Fragment key={c.symbol}>
                         <tr
-                          key={c.symbol}
                           className="border-t border-hud-line/20 hover:bg-hud-line/10 cursor-pointer"
-                          onClick={() =>
-                            window.open(
-                              `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
-                                c.exchange ? `${c.exchange}:${c.symbol}` : c.symbol
-                              )}`,
-                              '_blank'
-                            )
-                          }
-                          title={`Open ${c.symbol} chart on TradingView`}
+                          onClick={() => setExpandedMomo(prev => (prev === c.symbol ? null : c.symbol))}
+                          title={`Click row to ${expandedMomo === c.symbol ? 'collapse' : 'expand'} inline chart · click symbol for full TradingView`}
                         >
                           <td className="py-1">
-                            <span className="hud-value-sm">{c.symbol}</span>
+                            <span
+                              className="hud-value-sm hover:text-hud-primary underline decoration-hud-line/40 underline-offset-2"
+                              onClick={e => {
+                                e.stopPropagation()
+                                window.open(
+                                  `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
+                                    c.exchange ? `${c.exchange}:${c.symbol}` : c.symbol
+                                  )}`,
+                                  '_blank'
+                                )
+                              }}
+                              title={`Open ${c.symbol} on TradingView`}
+                            >{c.symbol}</span>
                             {c.nearHigh && <span className="text-[8px] text-hud-success ml-1" title="Holding near session high">▲HI</span>}
                             {status?.momoCharts?.[c.symbol]?.blueSky && (
                               <span className="text-[8px] text-hud-cyan ml-1" title="Blue sky — at/near 52-week high, no overhead supply">BS</span>
@@ -1119,6 +1125,21 @@ export default function App() {
                           <td className="py-1 text-right hud-value-sm text-hud-text-dim">{c.floatShares ? `${(c.floatShares / 1e6).toFixed(0)}M` : '—'}</td>
                           <td className="py-1 text-right hud-value-sm text-hud-cyan">{c.score.toFixed(0)}</td>
                         </tr>
+                        {expandedMomo === c.symbol && (
+                          <tr className="border-t border-hud-line/20">
+                            <td colSpan={9} className="p-0">
+                              <iframe
+                                title={`${c.symbol} chart`}
+                                className="w-full block"
+                                style={{ height: 420, border: 0 }}
+                                src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
+                                  c.exchange ? `${c.exchange}:${c.symbol}` : c.symbol
+                                )}&interval=1&theme=${theme}&style=1&locale=en&timezone=America%2FNew_York&hidesidetoolbar=1&symboledit=0&saveimage=0&withdateranges=0&hideideas=1`}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
