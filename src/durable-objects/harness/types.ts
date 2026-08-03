@@ -619,6 +619,9 @@ export interface AgentState {
   // token to have persisted across scans (rug guard: SPIDERCAT passed the
   // liquidity floor and went -98.7% eleven seconds after entry).
   dexCandidateFirstSeen?: Record<string, number>;
+  // Per-chain discovery funnel from the last scan (sourced vs qualified) —
+  // makes a dry chain visible in the dashboard instead of only in logs.
+  dexChainScanStats?: { chains: Record<string, { sourced: number; qualified: number }>; updatedAt: number };
   // Counterfactual tracking for the overextension cap: price at first block,
   // so later scans can answer "did we reject a winner (blocked_runner) or
   // dodge a dump (blocked_dump)?" with tape. Pruned after 24h.

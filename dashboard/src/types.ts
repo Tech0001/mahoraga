@@ -417,6 +417,7 @@ export interface Status {
   momoWatchlistUpdatedAt?: number
   momoCharts?: Record<string, ChartRead>
   momoCatalysts?: Record<string, { day: string; grade: 'A' | 'B' | 'C' | 'D'; catalyst: string; dilutionRisk: boolean; reasoning: string }>
+  dexChainScanStats?: { chains: Record<string, { sourced: number; qualified: number }>; updatedAt: number } | null
   overnightActivity?: OvernightActivity
   // DEX momentum trading
   dexPositions?: DexPosition[]

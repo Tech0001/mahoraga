@@ -110,6 +110,9 @@ const DEXSCREENER_BASE = "https://api.dexscreener.com";
 export class DexScreenerProvider {
   private rateLimitDelay = 1100; // ~55 requests/min (under 60 limit)
   private lastRequest = 0;
+  // Stats from the most recent findMomentumTokens call (per-chain funnel
+  // visibility: sourced vs qualified, so a dry chain is observable).
+  public lastScanStats: { sourced: number; qualified: number } | null = null;
 
   private async throttle(): Promise<void> {
     const now = Date.now();
@@ -643,6 +646,7 @@ export class DexScreenerProvider {
     console.log("[DexScreener] Filter stats:", JSON.stringify(stats));
 
     // Sort by momentum score descending
+    this.lastScanStats = { sourced: allPairs.length, qualified: signals.length };
     return signals.sort((a, b) => b.momentumScore - a.momentumScore);
   }
 

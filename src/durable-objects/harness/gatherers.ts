@@ -483,14 +483,18 @@ export async function gatherDexMomentum(ctx: HarnessContext): Promise<void> {
     });
 
     const signals: Awaited<ReturnType<typeof dexScreener.findMomentumTokens>> = [];
+    const chainStats: Record<string, { sourced: number; qualified: number }> = {};
     for (const chain of chains) {
       try {
         const chainSignals = await dexScreener.findMomentumTokens(findMomentumOptionsFor(chain));
         signals.push(...chainSignals);
+        chainStats[chain] = dexScreener.lastScanStats ?? { sourced: 0, qualified: chainSignals.length };
       } catch (e) {
+        chainStats[chain] = { sourced: 0, qualified: 0 };
         ctx.log("DexMomentum", "chain_scan_error", { chain, error: String(e).slice(0, 120) });
       }
     }
+    ctx.state.dexChainScanStats = { chains: chainStats, updatedAt: Date.now() };
     // Cross-chain fairness: one ranking by momentum score
     signals.sort((a, b) => b.momentumScore - a.momentumScore);
 

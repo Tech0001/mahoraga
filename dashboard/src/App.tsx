@@ -1152,9 +1152,19 @@ export default function App() {
           {config?.dex_enabled && ((status?.dexSignals?.length || 0) > 0 || (status?.dexPositions?.length || 0) > 0) && (
             <div className="col-span-4 md:col-span-8 lg:col-span-12">
               <Panel
-                title="DEX MOMENTUM (SOLANA)"
+                title="DEX MOMENTUM (MULTI-CHAIN)"
                 titleRight={
                   <div className="flex items-center gap-4">
+                    {status?.dexChainScanStats && (
+                      <span
+                        className="text-[9px] text-hud-text-dim"
+                        title="Last scan per chain: qualified/sourced. A chain with 0 qualified is scanning but nothing passes the gates yet."
+                      >
+                        {Object.entries(status.dexChainScanStats.chains).map(([ch, s]) =>
+                          `${ch === 'solana' ? '◎' : ch === 'robinhood' ? 'RH' : ch} ${s.qualified}/${s.sourced}`
+                        ).join(' · ')}
+                      </span>
+                    )}
                     {status?.dexPaperTrading && (
                       <span className="text-hud-warning text-xs">
                         PAPER: {status.dexPaperTrading.paperBalance?.toFixed(2)} SOL
