@@ -504,7 +504,7 @@ export default function App() {
               premarketPlan={status?.premarketPlan}
             />
             <button
-              className="hud-label hover:text-hud-primary transition-colors"
+              className="text-[16px] leading-none text-hud-text-dim hover:text-hud-primary transition-colors"
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             >
