@@ -1050,6 +1050,7 @@ export default function App() {
                     <thead>
                       <tr className="hud-label">
                         <th className="pb-1 font-normal">SYM</th>
+                        <th className="pb-1 font-normal">SETUP</th>
                         <th className="pb-1 font-normal text-right">PRICE</th>
                         <th className="pb-1 font-normal text-right">CHG</th>
                         <th className="pb-1 font-normal text-right">RVOL</th>
@@ -1076,6 +1077,27 @@ export default function App() {
                           <td className="py-1">
                             <span className="hud-value-sm">{c.symbol}</span>
                             {c.nearHigh && <span className="text-[8px] text-hud-success ml-1" title="Holding near session high">▲HI</span>}
+                            {status?.momoCharts?.[c.symbol]?.blueSky && (
+                              <span className="text-[8px] text-hud-cyan ml-1" title="Blue sky — at/near 52-week high, no overhead supply">BS</span>
+                            )}
+                          </td>
+                          <td className="py-1">
+                            {(() => {
+                              const r = status?.momoCharts?.[c.symbol]
+                              if (!r || r.setup === 'NONE') return <span className="hud-value-sm text-hud-text-dim">—</span>
+                              const color =
+                                r.setup === 'FLAG' || r.setup === 'ORB' || r.setup === 'VWAP_HOLD'
+                                  ? 'text-hud-success'
+                                  : r.setup === 'EXTENDED'
+                                    ? 'text-hud-warning'
+                                    : 'text-hud-error'
+                              const plan = r.trigger ? ` | trigger $${r.trigger.toFixed(2)}${r.stop ? ` stop $${r.stop.toFixed(2)}` : ''}` : ''
+                              return (
+                                <span className={`hud-value-sm ${color}`} title={`${r.note}${plan} | VWAP ${r.distFromVwapPct >= 0 ? '+' : ''}${r.distFromVwapPct.toFixed(1)}%`}>
+                                  {r.setup}
+                                </span>
+                              )
+                            })()}
                           </td>
                           <td className="py-1 text-right hud-value-sm">${c.price.toFixed(2)}</td>
                           <td className="py-1 text-right hud-value-sm text-hud-success">+{c.changePct.toFixed(1)}%</td>

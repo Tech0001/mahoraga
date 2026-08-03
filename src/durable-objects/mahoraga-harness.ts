@@ -329,7 +329,13 @@ export class MahoragaHarness extends DurableObject<Env> {
       ) {
         this.log("System", "phase_start", { phase: "momo_scan" });
         try {
-          await gatherers.gatherMomoWatchlist(this.getContext(), inPremarket);
+          // Session open (for opening-range math): regular session is 6.5h,
+          // so when the market is open, today's open = next_close - 6.5h.
+          const nextCloseMs = new Date(clock.next_close).getTime();
+          const sessionOpenMs = clock.is_open && Number.isFinite(nextCloseMs)
+            ? nextCloseMs - 6.5 * 3600 * 1000
+            : null;
+          await gatherers.gatherMomoWatchlist(this.getContext(), inPremarket, sessionOpenMs);
         } catch (e) {
           this.log("System", "phase_error", { phase: "momo_scan", error: String(e).slice(0, 160) });
         }

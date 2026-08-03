@@ -497,6 +497,10 @@ export interface AgentState {
   momoWatchlist: import("../../providers/tradingview").MomoCandidate[];
   momoWatchlistUpdatedAt: number;
   lastMomoScanRun: number;
+  // Chart-structure reads for watchlist symbols (and later, open positions)
+  momoCharts: Record<string, import("./chart-structure").ChartRead>;
+  // Daily-context cache (blue sky / overhead) — one bars fetch per symbol per day
+  momoDailyContext?: Record<string, { day: string; blueSky: boolean | null; overheadPct: number | null }>;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;
   socialSnapshotCacheUpdatedAt: number;
   signalResearch: Record<string, ResearchResult>;

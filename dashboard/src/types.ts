@@ -367,6 +367,21 @@ export interface PositionHistory {
   timestamps: number[]
 }
 
+export interface ChartRead {
+  setup: 'ORB' | 'FLAG' | 'VWAP_HOLD' | 'EXTENDED' | 'FADING' | 'BREAKDOWN' | 'NONE'
+  trigger: number | null
+  stop: number | null
+  note: string
+  vwap: number
+  hod: number
+  distFromVwapPct: number
+  distFromHodPct: number
+  higherLows: number
+  lowerHighs: number
+  blueSky: boolean | null
+  overheadPct: number | null
+}
+
 export interface MomoCandidate {
   symbol: string
   exchange: string
@@ -400,6 +415,7 @@ export interface Status {
   stalenessAnalysis?: Record<string, StalenessAnalysis>
   momoWatchlist?: MomoCandidate[]
   momoWatchlistUpdatedAt?: number
+  momoCharts?: Record<string, ChartRead>
   overnightActivity?: OvernightActivity
   // DEX momentum trading
   dexPositions?: DexPosition[]

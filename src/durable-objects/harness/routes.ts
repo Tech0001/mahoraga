@@ -131,6 +131,7 @@ export async function handleStatus(ctx: RoutesContext): Promise<Response> {
       stalenessAnalysis: ctx.state.stalenessAnalysis,
       momoWatchlist: ctx.state.momoWatchlist ?? [],
       momoWatchlistUpdatedAt: ctx.state.momoWatchlistUpdatedAt ?? 0,
+      momoCharts: ctx.state.momoCharts ?? {},
       // DEX positions with live P&L
       dexPositions: dexPositionsWithPnL,
       dexSignals: ctx.state.dexSignals.slice(0, 10), // Top 10 momentum signals

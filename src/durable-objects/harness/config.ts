@@ -217,6 +217,7 @@ export const DEFAULT_STATE: AgentState = {
   momoWatchlist: [],
   momoWatchlistUpdatedAt: 0,
   lastMomoScanRun: 0,
+  momoCharts: {},
   socialSnapshotCache: {},
   socialSnapshotCacheUpdatedAt: 0,
   signalResearch: {},

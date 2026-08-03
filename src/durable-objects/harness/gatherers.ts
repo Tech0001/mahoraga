@@ -17,6 +17,7 @@ import {
 import { createAlpacaProviders } from "../../providers/alpaca";
 import { createDexScreenerProvider } from "../../providers/dexscreener";
 import { scanMomoCandidates } from "../../providers/tradingview";
+import { readChart } from "./chart-structure";
 
 /**
  * Helper function for sleeping (used for rate limiting).
@@ -188,7 +189,11 @@ export function getSocialSnapshotCache(ctx: HarnessContext): Record<string, Soci
  * lane: ranked candidates land in state for the dashboard, premarket plan,
  * and the future opening-drive module — no trading decisions made here.
  */
-export async function gatherMomoWatchlist(ctx: HarnessContext, premarket: boolean): Promise<void> {
+export async function gatherMomoWatchlist(
+  ctx: HarnessContext,
+  premarket: boolean,
+  sessionOpenMs: number | null
+): Promise<void> {
   const cfg = ctx.state.config;
   const candidates = await scanMomoCandidates({
     premarket,
@@ -202,9 +207,72 @@ export async function gatherMomoWatchlist(ctx: HarnessContext, premarket: boolea
 
   ctx.state.momoWatchlist = candidates;
   ctx.state.momoWatchlistUpdatedAt = Date.now();
+
+  // Chart-structure enrichment: read the bars for the top names so every row
+  // carries a setup label and pre-planned trigger/stop before any order logic
+  // ever sees it. Alpaca free tier: ~2 requests per enriched symbol/scan.
+  const ENRICH_TOP_N = 8;
+  const alpaca = createAlpacaProviders(ctx.env);
+  const nowMs = Date.now();
+  const etDayKey = new Date().toISOString().slice(0, 10);
+  const charts: typeof ctx.state.momoCharts = {};
+
+  for (const cand of candidates.slice(0, ENRICH_TOP_N)) {
+    try {
+      const minuteBars = await alpaca.marketData.getBars(cand.symbol, "1Min", {
+        start: new Date(nowMs - 12 * 3600 * 1000).toISOString(),
+        limit: 500,
+      });
+      const read = readChart(minuteBars, sessionOpenMs);
+      if (!read) continue;
+
+      // Daily context, cached one fetch per symbol per day
+      const cache = ctx.state.momoDailyContext ?? (ctx.state.momoDailyContext = {});
+      let daily = cache[cand.symbol];
+      if (!daily || daily.day !== etDayKey) {
+        let blueSky: boolean | null = null;
+        let overheadPct: number | null = null;
+        try {
+          const dailyBars = await alpaca.marketData.getBars(cand.symbol, "1Day", {
+            start: new Date(nowMs - 370 * 86_400_000).toISOString(),
+            limit: 300,
+          });
+          if (dailyBars.length >= 20) {
+            const price = dailyBars[dailyBars.length - 1]!.c;
+            const yearHigh = Math.max(...dailyBars.slice(-252).map(b => b.h));
+            const sixtyHigh = Math.max(...dailyBars.slice(-60).map(b => b.h));
+            blueSky = price >= yearHigh * 0.98;
+            overheadPct = price > 0 ? Math.max(0, ((sixtyHigh - price) / price) * 100) : null;
+          }
+        } catch {
+          // keep nulls — daily context is enrichment, not a gate
+        }
+        daily = { day: etDayKey, blueSky, overheadPct };
+        cache[cand.symbol] = daily;
+      }
+      read.blueSky = daily.blueSky;
+      read.overheadPct = daily.overheadPct;
+      charts[cand.symbol] = read;
+    } catch (e) {
+      ctx.log("MomoScanner", "chart_read_error", { symbol: cand.symbol, error: String(e).slice(0, 120) });
+    }
+  }
+  ctx.state.momoCharts = charts;
+
+  // Prune stale daily-context entries
+  if (ctx.state.momoDailyContext) {
+    for (const sym of Object.keys(ctx.state.momoDailyContext)) {
+      if (ctx.state.momoDailyContext[sym]!.day !== etDayKey) delete ctx.state.momoDailyContext[sym];
+    }
+  }
+
   ctx.log("MomoScanner", "momo_watchlist", {
     session: premarket ? "premarket" : "regular",
     count: candidates.length,
+    setups: Object.entries(charts)
+      .filter(([, r]) => r.setup !== "NONE")
+      .map(([s, r]) => `${s}:${r.setup}`)
+      .join(",") || "none",
     top3: candidates
       .slice(0, 3)
       .map(c => `${c.symbol} +${c.changePct.toFixed(1)}% rvol ${c.rvol.toFixed(1)}x`)
