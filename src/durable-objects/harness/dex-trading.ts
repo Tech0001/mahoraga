@@ -537,7 +537,12 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       // if the token is genuinely good again it'll re-appear in discovery after the cooldown.
       // Losing exits get longer cooldowns and increment loss counters.
       const plBeforeSlippage = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
-      const isLosingExit = exitReason === "stop_loss" || plBeforeSlippage < 0;
+      // Neutral band (journal entry 30): a near-flat exit is churn noise, not
+      // a loss. BABYCATE exited -2% on a transient trending dropout, got the
+      // 2h loser ban, and ran +1199% while structurally banned from re-entry.
+      // Only real losses (or any stop_loss) trigger the loser lockout.
+      const loserBandPct = ctx.state.config.dex_loser_band_pct ?? 5;
+      const isLosingExit = exitReason === "stop_loss" || plBeforeSlippage < -loserBandPct;
 
       if (!ctx.state.dexStopLossCooldowns) ctx.state.dexStopLossCooldowns = {};
       const existingCooldown = ctx.state.dexStopLossCooldowns[tokenAddress];

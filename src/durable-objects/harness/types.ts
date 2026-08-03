@@ -90,6 +90,8 @@ export interface AgentConfig {
   momentum_news_scalp_hold_seconds: number; // [TUNE] Sell into the open rush after N seconds
   momentum_news_scalp_min_gap_pct: number; // [TUNE] Minimum premarket gap to scalp
   dex_lottery_stagnation_minutes: number; // [TUNE] Lottery flat past N min = dead signal, free the slot (0=off)
+  dex_loser_band_pct: number; // [TUNE] Exits within -N%..0 are churn noise, not losses (no loser lockout)
+  dex_open_position_alarm_ms: number; // [TUNE] Alarm cadence while DEX positions are open
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position

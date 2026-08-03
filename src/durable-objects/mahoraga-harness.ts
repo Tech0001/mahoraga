@@ -459,6 +459,21 @@ export class MahoragaHarness extends DurableObject<Env> {
         this.state.lastClockIsOpen = clock.is_open;
       }
 
+      // Fast-exit guarantee: if heavy phases stretched this cycle while DEX
+      // positions are open, re-check exits with fresh prices before sleeping.
+      if (
+        this.state.config.dex_enabled &&
+        Object.keys(this.state.dexPositions).length > 0 &&
+        Date.now() - now > 5_000
+      ) {
+        this.log("System", "phase_start", { phase: "dex_exits_recheck" });
+        try {
+          await dexTrading.runDexTrading(this.getContext());
+        } catch (e) {
+          this.log("System", "phase_error", { phase: "dex_exits_recheck", error: String(e).slice(0, 120) });
+        }
+      }
+
       await this.persist();
       this.log("System", "alarm_complete", { durationMs: Date.now() - now });
     } catch (error) {
@@ -469,7 +484,13 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async scheduleNextAlarm(): Promise<void> {
-    const nextRun = Date.now() + 10_000;  // 10 seconds - fast exit checks via Jupiter
+    // Memecoins collapse in ~20 seconds: with open DEX positions the loop
+    // tightens to 5s; idle book relaxes to 10s. (Jupiter free tier is 1 RPS;
+    // one batch price call per cycle at 5s = 0.2 RPS.)
+    const hasDexPositions =
+      this.state.config.dex_enabled && Object.keys(this.state.dexPositions).length > 0;
+    const fastMs = this.state.config.dex_open_position_alarm_ms ?? 5_000;
+    const nextRun = Date.now() + (hasDexPositions ? fastMs : 10_000);
     await this.ctx.storage.setAlarm(nextRun);
   }
 

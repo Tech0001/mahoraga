@@ -23,6 +23,8 @@ export const AgentConfigSchema = z.object({
   momentum_news_scalp_hold_seconds: z.number().min(5).max(120),
   momentum_news_scalp_min_gap_pct: z.number().min(1).max(100),
   dex_lottery_stagnation_minutes: z.number().min(0).max(360),
+  dex_loser_band_pct: z.number().min(0).max(30),
+  dex_open_position_alarm_ms: z.number().min(2000).max(30000),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

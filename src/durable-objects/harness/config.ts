@@ -33,6 +33,8 @@ export const DEFAULT_CONFIG: AgentConfig = {
   momentum_news_scalp_hold_seconds: 15,
   momentum_news_scalp_min_gap_pct: 10,
   dex_lottery_stagnation_minutes: 30,
+  dex_loser_band_pct: 5,
+  dex_open_position_alarm_ms: 5_000,
   max_position_value: 5000,
   max_positions: 5,
   min_sentiment_score: 0.3,
