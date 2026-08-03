@@ -177,8 +177,14 @@ async function checkExits(ctx: HarnessContext, alpaca: AlpacaProviders, minutesT
     try {
       const bar = await alpaca.marketData.getLatestBar(pos.symbol);
       price = bar.c;
-    } catch {
-      continue; // no price this cycle — try again next
+    } catch (e) {
+      // NEVER silent: a swallowed price failure here hid a provider bug for
+      // 90+ minutes while three positions ran unmanaged (2026-08-03).
+      ctx.log("Momentum", "momentum_price_error", {
+        symbol: pos.symbol,
+        error: String(e).slice(0, 120),
+      });
+      continue; // try again next cycle — the log makes the failure visible
     }
 
     let reason: string | null = null;

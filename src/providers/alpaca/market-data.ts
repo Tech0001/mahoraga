@@ -145,12 +145,15 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
   }
 
   async getLatestBar(symbol: string): Promise<Bar> {
-    const response = await this.client.dataRequest<AlpacaLatestBarsResponse>(
+    // Single-symbol endpoint returns {"bar": {...}, "symbol": "X"}, NOT the
+    // multi-symbol {"bars": {X: ...}} shape — this threw on every call and a
+    // silent catch downstream hid it (momentum exits never evaluated, 2026-08-03).
+    const response = await this.client.dataRequest<AlpacaLatestBarsResponse & { bar?: AlpacaBar }>(
       "GET",
       `/v2/stocks/${encodeURIComponent(symbol)}/bars/latest`
     );
 
-    const bar = response.bars[symbol];
+    const bar = response.bar ?? response.bars?.[symbol];
     if (!bar) {
       throw new Error(`No bar data for ${symbol}`);
     }
