@@ -20,6 +20,7 @@ import type { Bar } from "../../providers/types";
 
 export type SetupLabel =
   | "ORB" // at/near opening-range high with volume — breakout trigger armed
+  | "OPEN_RECLAIM" // open spike -> dip -> climbing off the dip low = real momentum (Director's bread-and-butter)
   | "FLAG" // tight consolidation near HOD after a leg up — continuation setup
   | "VWAP_HOLD" // pulled back to VWAP and holding with higher lows
   | "EXTENDED" // far above VWAP — chase risk, no fresh entry
@@ -148,6 +149,34 @@ export function readChart(
     overheadPct = price > 0 ? Math.max(0, ((sixtyDayHigh - price) / price) * 100) : null;
   }
 
+  // Open spike -> dip -> reclaim: the market-open pattern. Someone sees green
+  // and wants in; premarket holders sell the spike; if price puts in a low and
+  // climbs again, that reclaim is real momentum. Window: 6-45 min after open.
+  let openReclaim: { stop: number } | null = null;
+  if (sessionOpenMs !== null) {
+    const lastMs = new Date(last.t).getTime();
+    const minsSinceOpen = (lastMs - sessionOpenMs) / 60_000;
+    if (minsSinceOpen >= 6 && minsSinceOpen <= 45) {
+      const postOpen = minuteBars.filter(b => new Date(b.t).getTime() >= sessionOpenMs);
+      if (postOpen.length >= 6) {
+        const first10 = postOpen.slice(0, Math.min(10, postOpen.length));
+        const spikeHigh = Math.max(...first10.map(b => b.h));
+        const spikeIdx = postOpen.findIndex(b => b.h === spikeHigh);
+        const afterSpike = postOpen.slice(spikeIdx + 1);
+        if (afterSpike.length >= 3) {
+          const dipLow = Math.min(...afterSpike.map(b => b.l));
+          const dipped = dipLow <= spikeHigh * 0.98; // real profit-taking dip
+          const closes = postOpen.slice(-3).map(b => b.c);
+          const climbing = closes.length === 3 && closes[2]! > closes[1]! && closes[1]! > closes[0]!;
+          const offLow = price >= dipLow * 1.01 && price <= spikeHigh * 1.02; // rebounding, not already blown past
+          if (dipped && climbing && offLow && price >= vwap * 0.99) {
+            openReclaim = { stop: dipLow };
+          }
+        }
+      }
+    }
+  }
+
   // Classification — order matters: failure states first, then entries.
   let setup: SetupLabel = "NONE";
   let trigger: number | null = null;
@@ -164,6 +193,11 @@ export function readChart(
   } else if (distFromVwapPct > 10) {
     setup = "EXTENDED";
     note = `${distFromVwapPct.toFixed(1)}% above VWAP — chase risk, wait for a base`;
+  } else if (openReclaim) {
+    setup = "OPEN_RECLAIM";
+    trigger = price; // reclaim already confirming — enter on detection
+    stop = openReclaim.stop;
+    note = `open spike, dip, climbing off $${openReclaim.stop.toFixed(2)} — real momentum reclaim`;
   } else if (distFromHodPct > -5 && contraction < 0.5 && price >= vwap) {
     setup = "FLAG";
     trigger = Math.max(...lastN.map(b => b.h));

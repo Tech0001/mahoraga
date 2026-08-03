@@ -19,6 +19,9 @@ export const AgentConfigSchema = z.object({
   momentum_daily_loss_cap_usd: z.number().min(0).max(100000),
   momentum_time_exit_minutes: z.number().min(1).max(390),
   momentum_take_profit_r: z.number().min(0.5).max(10),
+  momentum_news_scalp_enabled: z.boolean(),
+  momentum_news_scalp_hold_seconds: z.number().min(5).max(120),
+  momentum_news_scalp_min_gap_pct: z.number().min(1).max(100),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

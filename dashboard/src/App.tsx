@@ -1093,7 +1093,7 @@ export default function App() {
                               const r = status?.momoCharts?.[c.symbol]
                               if (!r || r.setup === 'NONE') return <span className="hud-value-sm text-hud-text-dim">—</span>
                               const color =
-                                r.setup === 'FLAG' || r.setup === 'ORB' || r.setup === 'VWAP_HOLD'
+                                r.setup === 'FLAG' || r.setup === 'ORB' || r.setup === 'VWAP_HOLD' || r.setup === 'OPEN_RECLAIM'
                                   ? 'text-hud-success'
                                   : r.setup === 'EXTENDED'
                                     ? 'text-hud-warning'

@@ -86,6 +86,9 @@ export interface AgentConfig {
   momentum_daily_loss_cap_usd: number; // [TUNE] Lane halts for the day when breached
   momentum_time_exit_minutes: number; // [TUNE] Momo trades don't become bagholds
   momentum_take_profit_r: number; // [TUNE] Target = trigger + R x (trigger - stop)
+  momentum_news_scalp_enabled: boolean; // A-catalyst open scalp play
+  momentum_news_scalp_hold_seconds: number; // [TUNE] Sell into the open rush after N seconds
+  momentum_news_scalp_min_gap_pct: number; // [TUNE] Minimum premarket gap to scalp
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
@@ -357,6 +360,8 @@ export interface MomentumPosition {
   targetPrice: number;
   setupAtEntry: string;
   orderId?: string;
+  // News-scalp positions exit unconditionally at this timestamp
+  scalpUntil?: number;
   entrySnapshot: {
     score: number;
     rvol: number;

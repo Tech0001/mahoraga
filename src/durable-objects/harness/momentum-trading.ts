@@ -52,7 +52,65 @@ async function checkEntries(ctx: HarnessContext, alpaca: AlpacaProviders, minute
   if (minutesToClose < 30) return;
   if (Object.keys(positions).length >= (cfg.momentum_max_positions ?? 3)) return;
 
-  const actionable = new Set(["ORB", "FLAG", "VWAP_HOLD"]);
+  // News scalp (Director's second play): A-grade catalyst with a big gap —
+  // buy the open, sell into the rush seconds later, out before the dip.
+  // Paper fills flatter this pattern; its stats carry a discount until live.
+  const minutesSinceOpen = 390 - minutesToClose;
+  if (
+    (cfg.momentum_news_scalp_enabled ?? true) &&
+    minutesSinceOpen >= 0 &&
+    minutesSinceOpen <= 1.5
+  ) {
+    for (const cand of ctx.state.momoWatchlist) {
+      if (Object.keys(positions).length >= (cfg.momentum_max_positions ?? 3)) break;
+      if (positions[cand.symbol]) continue;
+      const cat = ctx.state.momoCatalysts?.[cand.symbol];
+      if (!cat || cat.grade !== "A" || cat.dilutionRisk) continue;
+      if (cand.changePct < (cfg.momentum_news_scalp_min_gap_pct ?? 10)) continue;
+      const qty = Math.floor((cfg.momentum_position_usd ?? 500) / cand.price);
+      if (qty < 1) continue;
+      try {
+        const order = await alpaca.trading.createOrder({
+          symbol: cand.symbol,
+          qty,
+          side: "buy",
+          type: "market",
+          time_in_force: "day",
+        });
+        positions[cand.symbol] = {
+          symbol: cand.symbol,
+          qty,
+          entryPrice: cand.price,
+          entryTime: Date.now(),
+          plannedStop: cand.price * 0.96,
+          targetPrice: cand.price * 1.1,
+          setupAtEntry: "NEWS_SCALP",
+          orderId: order?.id,
+          scalpUntil: Date.now() + (cfg.momentum_news_scalp_hold_seconds ?? 15) * 1000,
+          entrySnapshot: {
+            score: cand.score,
+            rvol: cand.rvol,
+            changePct: cand.changePct,
+            distFromVwapPct: 0,
+            blueSky: null,
+            note: `A-catalyst open scalp: ${cat.catalyst}`,
+          },
+        };
+        ctx.log("Momentum", "momentum_entry", {
+          symbol: cand.symbol,
+          setup: "NEWS_SCALP",
+          qty,
+          price: cand.price.toFixed(2),
+          catalyst: cat.catalyst,
+          holdSeconds: cfg.momentum_news_scalp_hold_seconds ?? 15,
+        });
+      } catch (e) {
+        ctx.log("Momentum", "momentum_entry_error", { symbol: cand.symbol, error: String(e).slice(0, 140) });
+      }
+    }
+  }
+
+  const actionable = new Set(["ORB", "OPEN_RECLAIM", "FLAG", "VWAP_HOLD"]);
   for (const cand of ctx.state.momoWatchlist) {
     if (Object.keys(positions).length >= (cfg.momentum_max_positions ?? 3)) break;
     if (positions[cand.symbol]) continue;
@@ -124,7 +182,8 @@ async function checkExits(ctx: HarnessContext, alpaca: AlpacaProviders, minutesT
     }
 
     let reason: string | null = null;
-    if (minutesToClose <= 5) reason = "eod_flatten";
+    if (pos.scalpUntil && Date.now() >= pos.scalpUntil) reason = "news_scalp_exit";
+    else if (minutesToClose <= 5) reason = "eod_flatten";
     else if (price <= pos.plannedStop) reason = "hard_stop";
     else if (price >= pos.targetPrice) reason = "target_hit";
     else if ((Date.now() - pos.entryTime) / 60_000 >= (cfg.momentum_time_exit_minutes ?? 45)) reason = "time_exit";

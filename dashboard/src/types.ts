@@ -368,7 +368,7 @@ export interface PositionHistory {
 }
 
 export interface ChartRead {
-  setup: 'ORB' | 'FLAG' | 'VWAP_HOLD' | 'EXTENDED' | 'FADING' | 'BREAKDOWN' | 'NONE'
+  setup: 'ORB' | 'OPEN_RECLAIM' | 'FLAG' | 'VWAP_HOLD' | 'EXTENDED' | 'FADING' | 'BREAKDOWN' | 'NONE'
   trigger: number | null
   stop: number | null
   note: string
