@@ -93,6 +93,9 @@ export interface AgentConfig {
   dex_loser_band_pct: number; // [TUNE] Exits within -N%..0 are churn noise, not losses (no loser lockout)
   dex_open_position_alarm_ms: number; // [TUNE] Alarm cadence while DEX positions are open
   dex_chains: string[]; // Chains to scan ("solana", "robinhood"); per-chain expectancy in ledger
+  dex_structure_gate_enabled: boolean; // Require reversal structure (candles) before entry
+  dex_structure_exits_enabled: boolean; // Structural exits: wedge/VWAP-lost/breakdown + sell-into-strength
+  dex_structure_top_vwap_pct: number; // [TUNE] "Vertical" = this % above VWAP for structure_top exits
 
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
@@ -444,6 +447,8 @@ export interface PremarketPlan {
 
 export interface DexPosition {
   chain?: string; // "solana" default; "robinhood" etc. — per-chain expectancy comparison
+  pairAddress?: string; // pool address for candle fetches (structure exits)
+  lastChartReadAt?: number; // throttle: structural reads at ~60s cadence
   tokenAddress: string;
   symbol: string;
   entryPrice: number;
@@ -494,7 +499,9 @@ export interface DexTradeRecord {
     | "distribution_exit"
     | "resistance_exit"
     | "liquidity_exit"
-    | "stagnation";
+    | "stagnation"
+    | "structure_exit"
+    | "structure_top";
   tier?: "microspray" | "breakout" | "lottery" | "early" | "established";
   // Entry-moment snapshot (copied from the position at exit)
   entryMomentumScore?: number;
@@ -619,6 +626,8 @@ export interface AgentState {
   // token to have persisted across scans (rug guard: SPIDERCAT passed the
   // liquidity floor and went -98.7% eleven seconds after entry).
   dexCandidateFirstSeen?: Record<string, number>;
+  // Chart-structure reads for DEX tokens (entry gate + structural exits)
+  dexCharts?: Record<string, import("./chart-structure").ChartRead>;
   // Per-chain discovery funnel from the last scan (sourced vs qualified) —
   // makes a dry chain visible in the dashboard instead of only in logs.
   dexChainScanStats?: { chains: Record<string, { sourced: number; qualified: number }>; updatedAt: number };

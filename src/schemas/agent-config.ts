@@ -26,6 +26,9 @@ export const AgentConfigSchema = z.object({
   dex_loser_band_pct: z.number().min(0).max(30),
   dex_open_position_alarm_ms: z.number().min(2000).max(30000),
   dex_chains: z.array(z.string().min(1)).min(1).max(10),
+  dex_structure_gate_enabled: z.boolean(),
+  dex_structure_exits_enabled: z.boolean(),
+  dex_structure_top_vwap_pct: z.number().min(5).max(200),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

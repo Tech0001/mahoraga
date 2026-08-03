@@ -16,6 +16,8 @@ import {
 import { createBirdeyeProvider } from "../../providers/birdeye";
 import { createDexScreenerProvider } from "../../providers/dexscreener";
 import { getJupiterPrices, createJupiterProvider } from "../../providers/jupiter";
+import { createGeckoTerminalProvider } from "../../providers/geckoterminal";
+import { readChart, structuralExitSignal } from "./chart-structure";
 
 /**
  * Run DEX momentum trading logic with PAPER TRADING.
@@ -129,7 +131,52 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     }
 
     let shouldExit = false;
-    let exitReason: "take_profit" | "stop_loss" | "lost_momentum" | "trailing_stop" | "breakeven_stop" | "scaling_trailing" | "stagnation" = "take_profit";
+    let exitReason: "take_profit" | "stop_loss" | "lost_momentum" | "trailing_stop" | "breakeven_stop" | "scaling_trailing" | "stagnation" | "structure_exit" | "structure_top" = "take_profit";
+
+    // Structural exits (candles, ~60s cadence per position): breakdown /
+    // descending wedge / VWAP lost fire before the hard stop; sell-into-
+    // strength when far above VWAP with real profit (Director: "get out at
+    // the top" instead of riding the retrace down).
+    if (ctx.state.config.dex_structure_exits_enabled ?? true) {
+      const sinceRead = Date.now() - (position.lastChartReadAt ?? 0);
+      if (sinceRead > 55_000 && position.pairAddress) {
+        try {
+          const gecko = createGeckoTerminalProvider();
+          const bars = await gecko.getMinuteBars(position.chain ?? "solana", position.pairAddress, 120);
+          position.lastChartReadAt = Date.now();
+          if (bars.length >= 15) {
+            const read = readChart(bars, null);
+            if (read) {
+              if (!ctx.state.dexCharts) ctx.state.dexCharts = {};
+              ctx.state.dexCharts[position.tokenAddress] = read;
+              const structSignal = structuralExitSignal(read, position.entryPrice, currentPrice);
+              const activationPct2 = ctx.state.config.dex_scaling_trailing_activation_pct ?? 10;
+              const topVwapPct = ctx.state.config.dex_structure_top_vwap_pct ?? 25;
+              if (structSignal) {
+                shouldExit = true;
+                exitReason = "structure_exit";
+                ctx.log("DexMomentum", "structure_exit_signal", {
+                  symbol: position.symbol,
+                  signal: structSignal,
+                  plPct: plPct.toFixed(1) + "%",
+                });
+              } else if (read.setup === "EXTENDED" && read.distFromVwapPct >= topVwapPct && plPct >= activationPct2 * 2) {
+                shouldExit = true;
+                exitReason = "structure_top";
+                ctx.log("DexMomentum", "structure_top_exit", {
+                  symbol: position.symbol,
+                  vwapDistPct: read.distFromVwapPct.toFixed(1),
+                  plPct: plPct.toFixed(1) + "%",
+                  reason: "vertical extension far above VWAP - selling into strength",
+                });
+              }
+            }
+          }
+        } catch (e) {
+          ctx.log("DexMomentum", "structure_read_error", { symbol: position.symbol, error: String(e).slice(0, 100) });
+        }
+      }
+    }
 
     // Lottery stagnation exit (journal entry 27): every lottery winner in the
     // 42-trade sample resolved within 20 minutes; the longest lottery holds
@@ -1189,6 +1236,43 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       continue;
     }
 
+    // Structure gate (Director, FROGE chart 2026-08-03): "green and trending"
+    // buys the top of the recovery. Require reversal structure from real
+    // candles — spike, dip, climbing off the base (RECLAIM) or building
+    // (FLAG/VWAP_HOLD). Fail-open when candles are unavailable (young pools
+    // may not be indexed yet) so Solana pump.fun flow keeps its old behavior.
+    if (ctx.state.config.dex_structure_gate_enabled ?? true) {
+      try {
+        const gecko = createGeckoTerminalProvider();
+        const bars = await gecko.getMinuteBars(candidate.chain ?? "solana", candidate.pairAddress, 120);
+        if (bars.length >= 15) {
+          const read = readChart(bars, null);
+          if (read) {
+            if (!ctx.state.dexCharts) ctx.state.dexCharts = {};
+            ctx.state.dexCharts[candidate.tokenAddress] = read;
+            const buildable = read.setup === "RECLAIM" || read.setup === "FLAG" || read.setup === "VWAP_HOLD";
+            if (!buildable) {
+              ctx.log("DexMomentum", "entry_blocked_structure", {
+                symbol: candidate.symbol,
+                chain: candidate.chain,
+                setup: read.setup,
+                vwapDistPct: read.distFromVwapPct.toFixed(1),
+                note: read.note.slice(0, 90),
+              });
+              continue;
+            }
+            ctx.log("DexMomentum", "entry_structure_ok", {
+              symbol: candidate.symbol,
+              setup: read.setup,
+              note: read.note.slice(0, 90),
+            });
+          }
+        }
+      } catch (e) {
+        ctx.log("DexMomentum", "structure_gate_error", { symbol: candidate.symbol, error: String(e).slice(0, 100) });
+      }
+    }
+
     // Check tier-specific position limits
     if (candidate.tier === 'microspray' && tierCounts.microspray >= maxMicroSpray) {
       ctx.log("DexMomentum", "microspray_limit_reached", {
@@ -1387,6 +1471,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     const position: DexPosition = {
       chain: candidate.chain ?? "solana",
       tokenAddress: candidate.tokenAddress,
+      pairAddress: candidate.pairAddress,
       symbol: candidate.symbol,
       entryPrice: entryPriceWithSlippage,
       entrySol: solAmount,
