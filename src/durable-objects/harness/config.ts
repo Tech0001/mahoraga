@@ -78,6 +78,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   dex_lottery_position_sol: 0.02,
   dex_lottery_max_positions: 5,
   dex_lottery_trailing_activation: 100,
+  dex_max_entry_1h_change: 150, // Overextension cap: losses entered at median +160%/1h, wins at +13%/1h (2026-08-03 sample)
   dex_lottery_stop_loss_pct: 35, // Stop loss for lottery tier
   // Microspray tier (ultra-small positions)
   dex_microspray_stop_loss_pct: 35, // Stop loss for microspray tier
@@ -107,7 +108,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   dex_stop_loss_pct: 35, // Stop loss at 35% - survive meme coin volatility (was 30%, too tight)
   dex_max_positions: 3,
   dex_slippage_model: "realistic", // Simulate realistic DEX slippage
-  dex_gas_fee_sol: 0.005, // ~$1 gas fee per trade at $200/SOL
+  dex_gas_fee_sol: 0.001, // Jupiter swap: 5k-lamport base + priority fee + amortized ATA rent ≈ 0.0005-0.0015 SOL; 0.005 overstated 5x and dominated the 2026-08-03 paper ledger (0.30 of 0.48 SOL total cost)
   dex_circuit_breaker_losses: 3, // Pause after 3 stop losses
   dex_circuit_breaker_window_hours: 24, // Within 24 hours
   dex_circuit_breaker_pause_hours: 1, // Pause for 1 hour (was 6) - shorter cooldown
@@ -230,6 +231,8 @@ export const DEFAULT_STATE: AgentState = {
   dexDrawdownPaused: false,
   // Stop loss cooldown tracking (#8)
   dexStopLossCooldowns: {},
+  // Candidate persistence tracking (rug guard)
+  dexCandidateFirstSeen: {},
   // Crisis Mode state
   crisisState: {
     level: 0,

@@ -208,7 +208,21 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     try {
       const alpaca = createAlpacaProviders(this.env);
-      const clock = await alpaca.trading.getClock();
+      // Alpaca is only needed for the stock/crypto/options lanes. If it is
+      // unreachable (bad keys, outage), degrade to a closed-market clock so
+      // the DEX lane still runs instead of aborting the whole cycle.
+      let alpacaAvailable = true;
+      let clock: import("../providers/types").MarketClock;
+      try {
+        clock = await alpaca.trading.getClock();
+      } catch (e) {
+        alpacaAvailable = false;
+        clock = { timestamp: new Date(now).toISOString(), is_open: false, next_open: "", next_close: "" };
+        if (!this.state.lastAlpacaErrorLog || now - this.state.lastAlpacaErrorLog > 300_000) {
+          this.log("System", "alpaca_unavailable", { error: String(e).slice(0, 200) });
+          this.state.lastAlpacaErrorLog = now;
+        }
+      }
 
       // Heartbeat log - shows what will run this cycle
       const willGatherData = now - this.state.lastDataGatherRun >= this.state.config.data_poll_interval_ms;
@@ -231,7 +245,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       // CRISIS MODE CHECK - Run before any trading logic
       // Monitors market stress indicators and takes protective actions
       // ═══════════════════════════════════════════════════════════════════════
-      if (this.state.config.crisis_mode_enabled) {
+      if (this.state.config.crisis_mode_enabled && alpacaAvailable) {
         await this.runCrisisCheck();
 
         // If full crisis (level 3), execute emergency actions and skip normal trading
@@ -275,25 +289,39 @@ export class MahoragaHarness extends DurableObject<Env> {
         await dexTrading.recordDexSnapshot(this.getContext());
       }
 
+      // Stock-lane phases must not abort the cycle (and the trailing
+      // persist()) when their upstream providers are unavailable.
       if (now - this.state.lastDataGatherRun >= this.state.config.data_poll_interval_ms) {
         this.log("System", "phase_start", { phase: "data_gather" });
-        await this.runDataGatherers();
+        try {
+          await this.runDataGatherers();
+        } catch (e) {
+          this.log("System", "phase_error", { phase: "data_gather", error: String(e).slice(0, 160) });
+        }
         this.state.lastDataGatherRun = now;
       }
 
       if (now - this.state.lastResearchRun >= RESEARCH_INTERVAL_MS) {
         this.log("System", "phase_start", { phase: "llm_research" });
-        await llmResearch.researchTopSignals(this.getContext(), 5);
+        try {
+          await llmResearch.researchTopSignals(this.getContext(), 5);
+        } catch (e) {
+          this.log("System", "phase_error", { phase: "llm_research", error: String(e).slice(0, 160) });
+        }
         this.state.lastResearchRun = now;
       }
 
       if (this.isPreMarketWindow() && !this.state.premarketPlan) {
-        await this.runPreMarketAnalysis();
+        try {
+          await this.runPreMarketAnalysis();
+        } catch (e) {
+          this.log("System", "phase_error", { phase: "premarket", error: String(e).slice(0, 160) });
+        }
       }
 
-      const positions = await alpaca.trading.getPositions();
+      const positions = alpacaAvailable ? await alpaca.trading.getPositions() : [];
 
-      if (this.state.config.crypto_enabled) {
+      if (this.state.config.crypto_enabled && alpacaAvailable) {
         await trading.runCryptoTrading(this.getContext(), alpaca, positions);
       }
 

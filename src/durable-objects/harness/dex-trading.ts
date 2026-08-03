@@ -14,7 +14,8 @@ import {
   getSolPriceUsd,
 } from "./utils";
 import { createBirdeyeProvider } from "../../providers/birdeye";
-import { getJupiterPrices } from "../../providers/jupiter";
+import { createDexScreenerProvider } from "../../providers/dexscreener";
+import { getJupiterPrices, createJupiterProvider } from "../../providers/jupiter";
 
 /**
  * Run DEX momentum trading logic with PAPER TRADING.
@@ -55,7 +56,9 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
   const positionAddresses = Object.keys(ctx.state.dexPositions);
   let jupiterPrices = new Map<string, number>();
   const jupiterApiKey = ctx.env.JUPITER_API_KEY;
-  if (positionAddresses.length > 0 && jupiterApiKey) {
+  // Price API v3 works unauthenticated (verified 2026-08-03); a key only
+  // raises rate limits, so never let its absence disable real-time pricing.
+  if (positionAddresses.length > 0) {
     try {
       jupiterPrices = await getJupiterPrices(positionAddresses, jupiterApiKey);
       if (jupiterPrices.size > 0) {
@@ -71,6 +74,8 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       ctx.log("DexMomentum", "jupiter_prices_error", { error: String(e) });
     }
   }
+
+  const dexScreener = createDexScreenerProvider();
 
   // Check exits for existing positions
   for (const [tokenAddress, position] of Object.entries(ctx.state.dexPositions)) {
@@ -89,12 +94,29 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       currentPrice = signal.priceUsd;
       priceSource = "dexscreener";
       position.lastKnownPrice = currentPrice;
-    } else if (position.lastKnownPrice) {
-      currentPrice = position.lastKnownPrice;
-      priceSource = "cached";
     } else {
-      currentPrice = position.entryPrice;
-      priceSource = "entry_fallback";
+      // Both live feeds missed this token — common mid-dump, when it falls
+      // off trending. A stale cached price overstates the exit, so try a
+      // direct pair lookup before trusting it.
+      let directPrice = 0;
+      try {
+        const pairs = await dexScreener.getTokenPairs("solana", tokenAddress);
+        const best = (pairs ?? [])
+          .filter(p => parseFloat(p.priceUsd) > 0)
+          .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+        if (best) directPrice = parseFloat(best.priceUsd);
+      } catch { /* fall through to cached */ }
+      if (directPrice > 0) {
+        currentPrice = directPrice;
+        priceSource = "dexscreener_direct";
+        position.lastKnownPrice = currentPrice;
+      } else if (position.lastKnownPrice) {
+        currentPrice = position.lastKnownPrice;
+        priceSource = "cached";
+      } else {
+        currentPrice = position.entryPrice;
+        priceSource = "entry_fallback";
+      }
     }
     const plPct = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
 
@@ -502,13 +524,23 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         // Losing exit: long cooldown + increment loss counters
         const cooldownHours = ctx.state.config.dex_stop_loss_cooldown_hours ?? 2;
         const consecutiveLosses = (existingCooldown?.consecutiveLosses ?? 0) + 1;
-        const totalLosses = (existingCooldown?.totalLosses ?? 0) + 1;
+        // A rug-class exit (>=90% loss) counts as all strikes at once: the 24h
+        // total-loss guard then bans the token outright. SPIDERCAT rugged -99%
+        // twice in one night (07:47, 11:25) — its "recovery" was the honeypot
+        // re-baiting, not a market.
+        const rugClassExit = plBeforeSlippage <= -90;
+        const totalLosses = rugClassExit
+          ? Math.max((existingCooldown?.totalLosses ?? 0) + 1, 3)
+          : (existingCooldown?.totalLosses ?? 0) + 1;
         ctx.state.dexStopLossCooldowns[tokenAddress] = {
           exitPrice: currentPrice,
           exitTime: Date.now(),
           fallbackExpiry: Date.now() + (cooldownHours * 60 * 60 * 1000),
           consecutiveLosses,
           totalLosses,
+          entryPrice: position.entryPrice,
+          exitReason,
+          losingExit: true,
         };
         ctx.log("DexMomentum", "cooldown_recorded", {
           symbol: position.symbol,
@@ -566,6 +598,11 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         pnlSol,
         exitReason,
         tier: position.tier,
+        entryMomentumScore: position.entryMomentumScore,
+        entryPriceChange5m: position.entryPriceChange5m,
+        entryPriceChange1h: position.entryPriceChange1h,
+        entryBuyRatio1h: position.entryBuyRatio1h,
+        entryAgeHours: position.entryAgeHours,
       };
 
       ctx.state.dexTradeHistory.push(tradeRecord);
@@ -804,6 +841,26 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     if (!ctx.state.dexStopLossCooldowns) return s;
     const cooldown = ctx.state.dexStopLossCooldowns[s.tokenAddress];
     if (!cooldown) return s;
+    // Missed-runner instrumentation: did a token we exited run 50%+ past our
+    // exit within 2h? Answers whether trailing/momentum exits cut runners
+    // early (February suspicion) with tape instead of memory.
+    if (
+      typeof cooldown === "object" &&
+      !cooldown.missedRunnerLogged &&
+      Date.now() - cooldown.exitTime < 2 * 60 * 60 * 1000 &&
+      s.priceUsd >= cooldown.exitPrice * 1.5
+    ) {
+      cooldown.missedRunnerLogged = true;
+      ctx.log("DexMomentum", "missed_runner", {
+        symbol: s.symbol,
+        exitPrice: cooldown.exitPrice.toExponential(3),
+        nowPrice: s.priceUsd.toExponential(3),
+        gainPastExit: (((s.priceUsd - cooldown.exitPrice) / cooldown.exitPrice) * 100).toFixed(0) + "%",
+        minutesSinceExit: Math.round((Date.now() - cooldown.exitTime) / 60000),
+        exitWasLoss: !!cooldown.losingExit,
+      });
+    }
+    if (typeof cooldown === "object" && cooldown.clearedAt) return s;
 
     // Handle legacy format (just a number timestamp)
     if (typeof cooldown === 'number') {
@@ -826,24 +883,17 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       return null;
     }
 
-    // Check if price has recovered X% above exit price (only after min cooldown)
-    const priceRecoveryThreshold = cooldown.exitPrice * (1 + recoveryPct / 100);
-    if (s.priceUsd >= priceRecoveryThreshold) {
-      const isDeadCat = await isDeadCatBounce(s);
-      if (isDeadCat) {
-        return null;
-      }
-
-      ctx.log("DexMomentum", "cooldown_cleared_price_recovery", {
+    // ========== TOTAL LOSS PROTECTION (FIX #6) ==========
+    // Block re-entry if token has lost 3+ times in the 24-hour window (totalLosses doesn't reset after 2 hours)
+    const maxTotalLosses = 3;
+    if ((cooldown.totalLosses ?? 0) >= maxTotalLosses) {
+      ctx.log("DexMomentum", "cooldown_blocked_total_losses", {
         symbol: s.symbol,
-        exitPrice: cooldown.exitPrice.toFixed(6),
-        currentPrice: s.priceUsd.toFixed(6),
-        recoveryPct: (((s.priceUsd - cooldown.exitPrice) / cooldown.exitPrice) * 100).toFixed(1) + "%",
-        minutesSinceExit: Math.round(timeSinceExit / 60000),
-        chartVerified: reentryBirdeye ? "yes" : "skipped",
+        totalLosses: cooldown.totalLosses,
+        maxAllowed: maxTotalLosses,
+        reason: "Token has lost too many times in 24h window - blocked until 24h cleanup",
       });
-      delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
-      return s;
+      return null;
     }
 
     // ========== CONSECUTIVE LOSS PROTECTION ==========
@@ -863,27 +913,45 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
           consecutiveLosses: cooldown.consecutiveLosses,
           reason: "Full cooldown expired - resetting consecutive loss counter",
         });
-        delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
+        cooldown.clearedAt = Date.now(); // preserve loss counters across re-entries
         return s;
       }
       return null;
     }
 
-    // ========== TOTAL LOSS PROTECTION (FIX #6) ==========
-    // Block re-entry if token has lost 3+ times in the 24-hour window (totalLosses doesn't reset after 2 hours)
-    const maxTotalLosses = 3;
-    if ((cooldown.totalLosses ?? 0) >= maxTotalLosses) {
-      ctx.log("DexMomentum", "cooldown_blocked_total_losses", {
+    // Check if price has recovered (only after min cooldown).
+    // Mild losing exits (lost_momentum, trailing): X% above the exit price.
+    // Severe exits (stop_loss): a bounce off the bottom of a dump is a dead
+    // cat, not a recovery — require price back at the pre-dump entry price.
+    // (Replaces the Birdeye dead-cat gate, which fails open without a key
+    // and has no candle quality in the 1-6h token window anyway.)
+    const priceRecoveryThreshold =
+      cooldown.exitReason === "stop_loss" && cooldown.entryPrice
+        ? Math.max(cooldown.entryPrice, cooldown.exitPrice * (1 + recoveryPct / 100))
+        : cooldown.exitPrice * (1 + recoveryPct / 100);
+    if (!cooldown.losingExit && s.priceUsd >= priceRecoveryThreshold) {
+      const isDeadCat = await isDeadCatBounce(s);
+      if (isDeadCat) {
+        return null;
+      }
+
+      ctx.log("DexMomentum", "cooldown_cleared_price_recovery", {
         symbol: s.symbol,
-        totalLosses: cooldown.totalLosses,
-        maxAllowed: maxTotalLosses,
-        reason: "Token has lost too many times in 24h window - blocked until 24h cleanup",
+        exitPrice: cooldown.exitPrice.toFixed(6),
+        currentPrice: s.priceUsd.toFixed(6),
+        recoveryPct: (((s.priceUsd - cooldown.exitPrice) / cooldown.exitPrice) * 100).toFixed(1) + "%",
+        minutesSinceExit: Math.round(timeSinceExit / 60000),
+        chartVerified: reentryBirdeye ? "yes" : "skipped",
       });
-      return null;
+      cooldown.clearedAt = Date.now(); // preserve loss counters across re-entries
+      return s;
     }
 
-    // Allow re-entry if momentum score is very strong (min time already checked above)
-    if (s.momentumScore >= minMomentum) {
+    // Allow re-entry if momentum score is very strong (min time already checked above).
+    // Strong momentum may shortcut the recovery margin, but never below the price
+    // where the last attempt died — that is a knife, not a re-ignition ("One" 07:00,
+    // re-entered -23% below its losing exit on momentum 72.6, lost another 7.7%).
+    if (!cooldown.losingExit && s.momentumScore >= minMomentum && s.priceUsd >= cooldown.exitPrice) {
       const isDeadCat = await isDeadCatBounce(s);
       if (isDeadCat) {
         return null;
@@ -896,7 +964,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         minutesSinceExit: Math.round(timeSinceExit / 60000),
         chartVerified: reentryBirdeye ? "yes" : "skipped",
       });
-      delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
+      cooldown.clearedAt = Date.now(); // preserve loss counters across re-entries
       return s;
     }
 
@@ -919,7 +987,7 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
         symbol: s.symbol,
         chartVerified: cooldown.totalLosses >= 2 ? "yes" : "skipped",
       });
-      delete ctx.state.dexStopLossCooldowns[s.tokenAddress];
+      cooldown.clearedAt = Date.now(); // preserve loss counters across re-entries
       return s;
     }
 
@@ -954,8 +1022,95 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
     ? createBirdeyeProvider(ctx.env.BIRDEYE_API_KEY)
     : null;
 
+  // Rug guard: a token must persist as a candidate across scans before it is
+  // buyable. Rug setups spike liquidity briefly to pass filters and pull it
+  // within a minute; genuine runners appear scan after scan.
+  if (!ctx.state.dexCandidateFirstSeen) ctx.state.dexCandidateFirstSeen = {};
+  const nowSeen = Date.now();
+  for (const c of candidates) {
+    if (!ctx.state.dexCandidateFirstSeen[c.tokenAddress]) {
+      ctx.state.dexCandidateFirstSeen[c.tokenAddress] = nowSeen;
+    }
+  }
+  // Prune stale first-seen entries (>24h) so the map cannot grow unbounded.
+  for (const [addr, ts] of Object.entries(ctx.state.dexCandidateFirstSeen)) {
+    if (nowSeen - ts > 24 * 60 * 60 * 1000) delete ctx.state.dexCandidateFirstSeen[addr];
+  }
+  const candidateConfirmMs = 45_000;
+
   for (const candidate of candidates) {
     if (Object.keys(ctx.state.dexPositions).length >= ctx.state.config.dex_max_positions) break;
+
+    // Honeypot gate 1 — sell-activity floor (Director, 2026-08-03): a token
+    // nobody has successfully sold is a token nobody CAN sell. Require real
+    // exits in the last hour and reject pure buy-euphoria tape (SPIDERCAT
+    // entered at 0.91 buy ratio and rugged -99%).
+    const sells1h = (candidate as { sells1h?: number }).sells1h ?? 0;
+    if (sells1h < 15 || candidate.buyRatio1h > 0.85) {
+      ctx.log("DexMomentum", "entry_blocked_no_exit_activity", {
+        symbol: candidate.symbol,
+        sells1h,
+        buyRatio1h: candidate.buyRatio1h.toFixed(2),
+        reason: sells1h < 15 ? "fewer than 15 successful sells in 1h" : "buy ratio > 0.85 (euphoria/no-exit tape)",
+      });
+      continue;
+    }
+
+    // Honeypot gate 2 — exit-route viability (paper-safe analog of the dust
+    // canary): ask Jupiter for a real SELL quote before entering. No route or
+    // huge impact means the exit door does not exist.
+    try {
+      const jup = createJupiterProvider();
+      const tokenUnits = Math.floor((0.02 * solPriceUsd / Math.max(candidate.priceUsd, 1e-12)) * 1e6); // ~position value in 6-dec units
+      const viable = await jup.isSwapViable({
+        inputMint: candidate.tokenAddress,
+        outputMint: "So11111111111111111111111111111111111111112",
+        amount: Math.max(tokenUnits, 1),
+        maxPriceImpactPct: 25,
+      });
+      if (!viable.viable) {
+        ctx.log("DexMomentum", "entry_blocked_no_sell_route", {
+          symbol: candidate.symbol,
+          reason: viable.reason ?? "sell quote failed",
+        });
+        continue;
+      }
+    } catch { /* quote API down: do not block on infrastructure failure */ }
+
+    // Unicode-abuse filter: combining diacritics / zero-width characters in a
+    // token symbol or name are an impersonation signature used by rug setups
+    // ("dͨoͣgͭ" persisted 2+ scans then pulled -66% in 13s, 2026-08-03). Legit
+    // tokens use plain text or emoji, never combining marks.
+    const unicodeAbuse = /[\u0300-\u036F\u1AB0-\u1AFF\u20D0-\u20FF\uFE20-\uFE2F\u200B-\u200F\uFEFF]/;
+    if (unicodeAbuse.test(candidate.symbol ?? "") || unicodeAbuse.test(candidate.name ?? "")) {
+      ctx.log("DexMomentum", "entry_blocked_unicode_abuse", {
+        symbol: candidate.symbol,
+        reason: "combining/zero-width characters in symbol or name",
+      });
+      continue;
+    }
+
+    // Overextension cap: buying a token already up 150%+ on the hour is
+    // chasing the top of the pump (worst entries of 2026-08-03: +10413%,
+    // +413%, +247% at entry; the winners entered at +13% median or on dips).
+    const maxEntry1h = ctx.state.config.dex_max_entry_1h_change ?? 150;
+    if ((candidate.priceChange1h ?? 0) > maxEntry1h) {
+      ctx.log("DexMomentum", "entry_blocked_overextended", {
+        symbol: candidate.symbol,
+        priceChange1h: (candidate.priceChange1h ?? 0).toFixed(0) + "%",
+        cap: maxEntry1h + "%",
+      });
+      continue;
+    }
+
+    const firstSeen = ctx.state.dexCandidateFirstSeen[candidate.tokenAddress] ?? nowSeen;
+    if (nowSeen - firstSeen < candidateConfirmMs) {
+      ctx.log("DexMomentum", "entry_deferred_unconfirmed", {
+        symbol: candidate.symbol,
+        reason: "first scan as candidate - waiting for persistence confirmation",
+      });
+      continue;
+    }
 
     // Check tier-specific position limits
     if (candidate.tier === 'microspray' && tierCounts.microspray >= maxMicroSpray) {
@@ -1163,6 +1318,10 @@ export async function runDexTrading(ctx: HarnessContext): Promise<void> {
       entryMomentumScore: candidate.momentumScore, // Track for decay detection (#12)
       entryLiquidity: candidate.liquidity, // Track for exit safety (#13)
       tier: candidate.tier, // Track for tier-specific rules
+      entryPriceChange5m: candidate.priceChange5m,
+      entryPriceChange1h: candidate.priceChange1h,
+      entryBuyRatio1h: candidate.buyRatio1h,
+      entryAgeHours: candidate.ageHours,
     };
 
     ctx.state.dexPositions[candidate.tokenAddress] = position;
@@ -1284,6 +1443,18 @@ export async function recordDexSnapshot(ctx: HarnessContext): Promise<void> {
   // Calculate current drawdown
   const drawdownPct = ((ctx.state.dexPeakValue - totalValueSol) / ctx.state.dexPeakValue) * 100;
   const maxDrawdownPct = ctx.state.config.dex_max_drawdown_pct || 25;
+
+  // Unpause when drawdown is back under the configured limit. The original
+  // latch lifted only on a NEW HIGH, but a pause blocks the entries that could
+  // produce one — with a single open position that is a near-deadlock.
+  if (ctx.state.dexDrawdownPaused && drawdownPct < maxDrawdownPct) {
+    ctx.state.dexDrawdownPaused = false;
+    ctx.log("DexMomentum", "drawdown_pause_lifted", {
+      drawdownPct: drawdownPct.toFixed(1) + "%",
+      limit: maxDrawdownPct + "%",
+      reason: "Drawdown back under configured limit",
+    });
+  }
 
   // Check if drawdown exceeds limit
   if (drawdownPct >= maxDrawdownPct && !ctx.state.dexDrawdownPaused) {

@@ -41,7 +41,7 @@ export interface JupiterSwapResult {
   priceImpact: number;
 }
 
-const JUPITER_API = "https://quote-api.jup.ag/v6";
+const JUPITER_API = "https://lite-api.jup.ag/swap/v1"; // quote-api.jup.ag/v6 sunset (dead 2026-08); lite-api = free tier, api.jup.ag = keyed
 const JUPITER_PRICE_API = "https://api.jup.ag/price/v3";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 

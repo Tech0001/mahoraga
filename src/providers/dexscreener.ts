@@ -91,6 +91,7 @@ export interface DexMomentumSignal {
   ageDays: number;
   buyRatio24h: number;
   buyRatio1h: number;
+  sells1h: number; // absolute successful sells in the last hour (honeypot floor)
   txnCount24h: number;
   momentumScore: number;
   dexId: string;
@@ -594,6 +595,7 @@ export class DexScreenerProvider {
         liquidity,
         buyRatio24h,
         buyRatio1h,
+        sells1h,
         ageDays,
         txnCount24h: totalTxns24h,
         tier,
@@ -619,6 +621,7 @@ export class DexScreenerProvider {
         ageDays,
         buyRatio24h,
         buyRatio1h,
+        sells1h,
         txnCount24h: totalTxns24h,
         momentumScore,
         dexId: pair.dexId,
@@ -697,6 +700,7 @@ export class DexScreenerProvider {
     liquidity: number;
     buyRatio24h: number;
     buyRatio1h: number;
+  sells1h: number; // absolute successful sells in the last hour (honeypot floor)
     ageDays: number;
     txnCount24h: number;
     tier: "microspray" | "breakout" | "lottery" | "early" | "established";

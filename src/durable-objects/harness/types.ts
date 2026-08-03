@@ -150,6 +150,7 @@ export interface AgentConfig {
   dex_lottery_position_sol: number; // [TUNE] Fixed tiny position size in SOL (default 0.02)
   dex_lottery_max_positions: number; // [TUNE] Max concurrent lottery positions (default 5)
   dex_lottery_trailing_activation: number; // [TUNE] Auto-enable trailing stop at this gain % (default 100)
+  dex_max_entry_1h_change?: number; // [TUNE] Reject entries already up more than this % on the 1h candle (overextension cap, default 150)
   // Tier 1: Early Gems (6h-3 days)
   dex_early_min_age_days: number; // [TUNE] Tier 1: Min age (default 0.25 = 6 hours)
   dex_early_max_age_days: number; // [TUNE] Tier 1: Max age (default 3 days)
@@ -392,6 +393,12 @@ export interface DexPosition {
   tier?: "microspray" | "breakout" | "lottery" | "early" | "established"; // Track for tier-specific rules
   missedScans?: number; // Track consecutive scans where token wasn't in signals (grace period for lost_momentum)
   lastKnownPrice?: number; // Last price seen when signal was available (for when signal is missing)
+  // Entry-moment signal snapshot — lets post-hoc analysis test whether entries
+  // arrive too late in the move (chasing tops) without any external data.
+  entryPriceChange5m?: number;
+  entryPriceChange1h?: number;
+  entryBuyRatio1h?: number;
+  entryAgeHours?: number;
 }
 
 export interface DexPortfolioSnapshot {
@@ -424,6 +431,12 @@ export interface DexTradeRecord {
     | "resistance_exit"
     | "liquidity_exit";
   tier?: "microspray" | "breakout" | "lottery" | "early" | "established";
+  // Entry-moment snapshot (copied from the position at exit)
+  entryMomentumScore?: number;
+  entryPriceChange5m?: number;
+  entryPriceChange1h?: number;
+  entryBuyRatio1h?: number;
+  entryAgeHours?: number;
 }
 
 export interface DexTradingMetrics {
@@ -465,6 +478,8 @@ export interface AgentState {
   twitterDailyReadReset: number;
   premarketPlan: PremarketPlan | null;
   enabled: boolean;
+  lastAlpacaErrorLog?: number; // Throttle for alpaca_unavailable log spam
+
   // DEX momentum trading state
   dexSignals: DexMomentumSignal[];
   dexPositions: Record<string, DexPosition>;
@@ -489,8 +504,32 @@ export interface AgentState {
   // Stop loss cooldown tracking (#8) - price-based re-entry with consecutive loss tracking
   dexStopLossCooldowns: Record<
     string,
-    { exitPrice: number; exitTime: number; fallbackExpiry: number; consecutiveLosses: number; totalLosses: number }
+    {
+      exitPrice: number;
+      exitTime: number;
+      fallbackExpiry: number;
+      consecutiveLosses: number;
+      totalLosses: number;
+      // Severe (stop_loss) exits must recover to the pre-dump entry price,
+      // not just bounce off the stop-out price. Optional for legacy records.
+      entryPrice?: number;
+      exitReason?: string;
+      // Set instead of deleting the record when a re-entry is allowed, so
+      // consecutive/total loss counters survive across re-entries. A cleared
+      // record does not block entries; the next losing exit increments on top.
+      clearedAt?: number;
+      // True when the exit that created this record was a loss. Losing records
+      // permit NO early clears (price-recovery or momentum) — full expiry only.
+      losingExit?: boolean;
+      // Set once the exited token was observed 50%+ above our exit within 2h
+      // (missed-runner instrumentation for the trailing-stop question).
+      missedRunnerLogged?: boolean;
+    }
   >;
+  // First time each token appeared as a buy candidate. Entries require the
+  // token to have persisted across scans (rug guard: SPIDERCAT passed the
+  // liquidity floor and went -98.7% eleven seconds after entry).
+  dexCandidateFirstSeen?: Record<string, number>;
   // Crisis Mode state
   crisisState: CrisisState;
   lastCrisisCheck: number;
