@@ -1402,6 +1402,9 @@ export default function App() {
                   <div className="text-hud-text-dim text-sm py-4 text-center">Researching candidates...</div>
                 ) : (
                   Object.entries(status?.signalResearch || {})
+                    // Drop malformed records (a bad LLM response once persisted
+                    // all-null fields and crashed the whole app on render).
+                    .filter(([, r]) => r && typeof r.verdict === 'string' && typeof r.entry_quality === 'string')
                     .sort(([, a], [, b]) => b.timestamp - a.timestamp)
                     .map(([symbol, research]: [string, SignalResearch]) => (
                     <Tooltip

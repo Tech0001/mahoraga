@@ -8,6 +8,24 @@ interface OpenRouterModel {
   completionPrice: number
 }
 
+// Curated quick-picks rendered as clickable chips under the model fields.
+const RESEARCH_SUGGESTIONS = [
+  { id: 'deepseek/deepseek-v4-flash-0731', label: 'deepseek-v4-flash', price: '$0.09/$0.18' },
+  { id: 'qwen/qwen3.7-flash', label: 'qwen3.7-flash', price: '$0.03/$0.13' },
+  { id: 'google/gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite', price: '$0.10/$0.40' },
+  { id: 'openai/gpt-5-nano', label: 'gpt-5-nano', price: '$0.05/$0.40' },
+  { id: 'z-ai/glm-4.7-flash', label: 'glm-4.7-flash', price: '$0.06/$0.40' },
+]
+
+const ANALYST_SUGGESTIONS = [
+  { id: 'deepseek/deepseek-v4-pro', label: 'deepseek-v4-pro', price: '$0.44/$0.87' },
+  { id: 'z-ai/glm-4.7', label: 'glm-4.7', price: '$0.40/$1.75' },
+  { id: 'moonshotai/kimi-k2.5', label: 'kimi-k2.5', price: '$0.57/$2.85' },
+  { id: 'google/gemini-3-flash-preview', label: 'gemini-3-flash', price: '$0.50/$3.00' },
+  { id: 'openai/gpt-5.1', label: 'gpt-5.1 (frontier)', price: '$1.25/$10' },
+  { id: 'anthropic/claude-sonnet-4.5', label: 'sonnet-4.5 (frontier)', price: '$3/$15' },
+]
+
 // Curated fallback shown when the live OpenRouter catalog is unreachable.
 const OPENROUTER_FALLBACK: OpenRouterModel[] = [
   { id: 'deepseek/deepseek-v4-flash-0731', promptPrice: 0.09, completionPrice: 0.18 },
@@ -324,6 +342,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
               <div>
                 <label className="hud-label block mb-1">Research Model (cheap)</label>
                 {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') ? (
+                  <>
                   <input
                     type="text"
                     list="openrouter-model-list"
@@ -332,6 +351,24 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     onChange={e => handleChange('llm_model', e.target.value)}
                     placeholder="deepseek/deepseek-v4-flash-0731"
                   />
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {RESEARCH_SUGGESTIONS.map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        title={`${s.id} — ${s.price} per M tokens`}
+                        onClick={() => handleChange('llm_model', s.id)}
+                        className={`hud-label px-1.5 py-0.5 border rounded transition-colors ${
+                          localConfig.llm_model === s.id
+                            ? 'border-hud-primary text-hud-primary'
+                            : 'border-hud-line/40 hover:border-hud-primary hover:text-hud-primary'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  </>
                 ) : (
                 <select
                   className="hud-input w-full"
@@ -383,6 +420,7 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
               <div>
                 <label className="hud-label block mb-1">Analyst Model (smart)</label>
                 {(!localConfig.llm_provider || localConfig.llm_provider === 'openai-raw') ? (
+                  <>
                   <input
                     type="text"
                     list="openrouter-model-list"
@@ -391,6 +429,24 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                     onChange={e => handleChange('llm_analyst_model', e.target.value)}
                     placeholder="deepseek/deepseek-v4-pro"
                   />
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {ANALYST_SUGGESTIONS.map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        title={`${s.id} — ${s.price} per M tokens`}
+                        onClick={() => handleChange('llm_analyst_model', s.id)}
+                        className={`hud-label px-1.5 py-0.5 border rounded transition-colors ${
+                          localConfig.llm_analyst_model === s.id
+                            ? 'border-hud-primary text-hud-primary'
+                            : 'border-hud-line/40 hover:border-hud-primary hover:text-hud-primary'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  </>
                 ) : (
                 <select
                   className="hud-input w-full"

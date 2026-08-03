@@ -123,23 +123,39 @@ JSON response:
     }
 
     const content = response.content || "{}";
-    const analysis = JSON.parse(content.replace(/```json\n?|```/g, "").trim()) as {
-      verdict: "BUY" | "SKIP" | "WAIT";
-      confidence: number;
-      entry_quality: "excellent" | "good" | "fair" | "poor";
-      reasoning: string;
-      red_flags: string[];
-      catalysts: string[];
-    };
+    const analysis = JSON.parse(content.replace(/```json\n?|```/g, "").trim()) as Record<string, unknown>;
+
+    // Validate before persisting: a malformed model response stored verbatim
+    // once produced an all-null record that downstream consumers trusted.
+    const verdict = analysis.verdict === "BUY" || analysis.verdict === "SKIP" || analysis.verdict === "WAIT"
+      ? analysis.verdict
+      : null;
+    const confidence = typeof analysis.confidence === "number" && Number.isFinite(analysis.confidence)
+      ? Math.max(0, Math.min(1, analysis.confidence))
+      : null;
+    if (!verdict || confidence === null) {
+      ctx.log("SignalResearch", "invalid_llm_response", {
+        symbol,
+        model: ctx.state.config.llm_model,
+        snippet: content.slice(0, 140),
+      });
+      return null;
+    }
+    const entryQuality = analysis.entry_quality === "excellent" || analysis.entry_quality === "good" ||
+      analysis.entry_quality === "fair" || analysis.entry_quality === "poor"
+      ? analysis.entry_quality
+      : "fair";
+    const asStrings = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
     const result: ResearchResult = {
       symbol,
-      verdict: analysis.verdict,
-      confidence: analysis.confidence,
-      entry_quality: analysis.entry_quality,
-      reasoning: analysis.reasoning,
-      red_flags: analysis.red_flags || [],
-      catalysts: analysis.catalysts || [],
+      verdict,
+      confidence,
+      entry_quality: entryQuality,
+      reasoning: typeof analysis.reasoning === "string" ? analysis.reasoning : "",
+      red_flags: asStrings(analysis.red_flags),
+      catalysts: asStrings(analysis.catalysts),
       timestamp: Date.now(),
     };
 
