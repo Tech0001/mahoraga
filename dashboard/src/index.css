@@ -1,28 +1,30 @@
 @import "tailwindcss";
 
 @theme {
-  --color-hud-bg: #0a0c0e;
-  --color-hud-bg-panel: #0d1012;
-  --color-hud-bg-lighter: #141618;
+  /* Deep blue-graphite, not near-black: panels stay visible and the text
+     ladder clears WCAG on both bg and panel (validated 2026-08-03). */
+  --color-hud-bg: #12161b;
+  --color-hud-bg-panel: #171c22;
+  --color-hud-bg-lighter: #1d232a;
 
-  --color-hud-primary: #7a9ba8;
-  --color-hud-dim: #3a4a52;
-  --color-hud-line: rgba(122, 155, 168, 0.15);
-  --color-hud-border: rgba(122, 155, 168, 0.2);
+  --color-hud-primary: #8fb0bd;
+  --color-hud-dim: #4a5c66;
+  --color-hud-line: rgba(143, 176, 189, 0.22);
+  --color-hud-border: rgba(143, 176, 189, 0.3);
 
-  --color-hud-text: #7a9ba8;
-  --color-hud-text-dim: #4a5a62;
-  --color-hud-text-bright: #c8dce4;
+  --color-hud-text: #8fb0bd;
+  --color-hud-text-dim: #687b8a;
+  --color-hud-text-bright: #d7e6ed;
 
-  --color-hud-success: #4a9868;
-  --color-hud-warning: #b89848;
-  --color-hud-error: #b84848;
-  --color-hud-purple: #8a6ab8;
-  --color-hud-cyan: #5a9ab8;
-  --color-hud-blue: #5a7ab8;
-  --color-hud-green: #4a9868;
-  --color-hud-yellow: #b89848;
-  --color-hud-red: #b84848;
+  --color-hud-success: #57b07a;
+  --color-hud-warning: #c9a854;
+  --color-hud-error: #cf5f5f;
+  --color-hud-purple: #9d7fcb;
+  --color-hud-cyan: #69b0cf;
+  --color-hud-blue: #6d8ccb;
+  --color-hud-green: #57b07a;
+  --color-hud-yellow: #c9a854;
+  --color-hud-red: #cf5f5f;
 
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
 }
