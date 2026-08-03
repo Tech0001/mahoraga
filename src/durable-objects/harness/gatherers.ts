@@ -2,7 +2,9 @@
  * Data Gatherers Module
  *
  * Extracted data gathering functions from MahoragaHarness.
- * Handles fetching signals from StockTwits, Reddit, crypto markets, and DEX momentum.
+ * Handles fetching signals from StockTwits, crypto markets, and DEX momentum.
+ * (Reddit gatherer removed 2026-08-03: Reddit's API lockdown 403s all
+ * unauthenticated JSON access; StockTwits carries the sentiment lane.)
  */
 
 import type { HarnessContext } from "./context";
@@ -10,10 +12,6 @@ import type { Signal, SocialHistoryEntry, SocialSnapshotCacheEntry } from "./typ
 import { SOURCE_CONFIG } from "./types";
 import {
   calculateTimeDecay,
-  getEngagementMultiplier,
-  getFlairMultiplier,
-  extractTickers,
-  detectSentiment,
   tickerCache,
 } from "./utils";
 import { createAlpacaProviders } from "../../providers/alpaca";
@@ -29,20 +27,19 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Run all data gatherers and update signal cache.
- * Orchestrates StockTwits, Reddit, and crypto data gathering.
+ * Orchestrates StockTwits and crypto data gathering.
  */
 export async function runDataGatherers(ctx: HarnessContext): Promise<void> {
   ctx.log("System", "gathering_data", {});
 
   await tickerCache.refreshSecTickersIfNeeded();
 
-  const [stocktwitsSignals, redditSignals, cryptoSignals] = await Promise.all([
+  const [stocktwitsSignals, cryptoSignals] = await Promise.all([
     gatherStockTwits(ctx),
-    gatherReddit(ctx),
     gatherCrypto(ctx),
   ]);
 
-  const allSignals = [...stocktwitsSignals, ...redditSignals, ...cryptoSignals];
+  const allSignals = [...stocktwitsSignals, ...cryptoSignals];
 
   const MAX_SIGNALS = 200;
   const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -73,7 +70,6 @@ export async function runDataGatherers(ctx: HarnessContext): Promise<void> {
 
   ctx.log("System", "data_gathered", {
     stocktwits: stocktwitsSignals.length,
-    reddit: redditSignals.length,
     crypto: cryptoSignals.length,
     total: ctx.state.signalCache.length,
   });
@@ -311,132 +307,6 @@ export async function gatherStockTwits(ctx: HarnessContext): Promise<Signal[]> {
   return signals;
 }
 
-/**
- * Gather signals from Reddit trading subreddits.
- */
-export async function gatherReddit(ctx: HarnessContext): Promise<Signal[]> {
-  const subreddits = ["wallstreetbets", "stocks", "investing", "options"];
-  const tickerData = new Map<string, {
-    mentions: number;
-    weightedSentiment: number;
-    rawSentiment: number;
-    totalQuality: number;
-    upvotes: number;
-    comments: number;
-    sources: Set<string>;
-    bestFlair: string | null;
-    bestFlairMult: number;
-    freshestPost: number;
-  }>();
-
-  for (const sub of subreddits) {
-    const sourceWeight = SOURCE_CONFIG.weights[`reddit_${sub}` as keyof typeof SOURCE_CONFIG.weights] || 0.7;
-
-    try {
-      const res = await fetch(`https://www.reddit.com/r/${sub}/hot.json?limit=25`, {
-        headers: { "User-Agent": "Mahoraga/2.0" },
-      });
-      if (!res.ok) continue;
-      const data = await res.json() as { data?: { children?: Array<{ data: { title?: string; selftext?: string; created_utc?: number; ups?: number; num_comments?: number; link_flair_text?: string } }> } };
-      const posts = data.data?.children?.map(c => c.data) || [];
-
-      for (const post of posts) {
-        const text = `${post.title || ""} ${post.selftext || ""}`;
-        const tickers = extractTickers(text, ctx.state.config.ticker_blacklist);
-        const rawSentiment = detectSentiment(text);
-
-        const timeDecay = calculateTimeDecay(post.created_utc || Date.now() / 1000);
-        const engagementMult = getEngagementMultiplier(post.ups || 0, post.num_comments || 0);
-        const flairMult = getFlairMultiplier(post.link_flair_text);
-        const qualityScore = timeDecay * engagementMult * flairMult * sourceWeight;
-
-        for (const ticker of tickers) {
-          if (!tickerData.has(ticker)) {
-            tickerData.set(ticker, {
-              mentions: 0,
-              weightedSentiment: 0,
-              rawSentiment: 0,
-              totalQuality: 0,
-              upvotes: 0,
-              comments: 0,
-              sources: new Set(),
-              bestFlair: null,
-              bestFlairMult: 0,
-              freshestPost: 0,
-            });
-          }
-          const d = tickerData.get(ticker)!;
-          d.mentions++;
-          d.rawSentiment += rawSentiment;
-          d.weightedSentiment += rawSentiment * qualityScore;
-          d.totalQuality += qualityScore;
-          d.upvotes += post.ups || 0;
-          d.comments += post.num_comments || 0;
-          d.sources.add(sub);
-
-          if (flairMult > d.bestFlairMult) {
-            d.bestFlair = post.link_flair_text || null;
-            d.bestFlairMult = flairMult;
-          }
-
-          if ((post.created_utc || 0) > d.freshestPost) {
-            d.freshestPost = post.created_utc || 0;
-          }
-        }
-      }
-
-      await sleep(1000);
-    } catch {
-      continue;
-    }
-  }
-
-  const signals: Signal[] = [];
-  const alpaca = createAlpacaProviders(ctx.env);
-
-  for (const [symbol, data] of tickerData) {
-    if (data.mentions >= 2) {
-      if (!tickerCache.isKnownSecTicker(symbol)) {
-        const cached = tickerCache.getCachedValidation(symbol);
-        if (cached === false) continue;
-        if (cached === undefined) {
-          const isValid = await tickerCache.validateWithAlpaca(symbol, alpaca);
-          if (!isValid) {
-            ctx.log("Reddit", "invalid_ticker_filtered", { symbol });
-            continue;
-          }
-        }
-      }
-
-      const avgRawSentiment = data.rawSentiment / data.mentions;
-      const avgQuality = data.totalQuality / data.mentions;
-      const finalSentiment = data.totalQuality > 0
-        ? data.weightedSentiment / data.mentions
-        : avgRawSentiment * 0.5;
-      const freshness = calculateTimeDecay(data.freshestPost);
-
-      signals.push({
-        symbol,
-        source: "reddit",
-        source_detail: `reddit_${Array.from(data.sources).join("+")}`,
-        sentiment: finalSentiment,
-        raw_sentiment: avgRawSentiment,
-        volume: data.mentions,
-        upvotes: data.upvotes,
-        comments: data.comments,
-        quality_score: avgQuality,
-        freshness,
-        best_flair: data.bestFlair,
-        subreddits: Array.from(data.sources),
-        source_weight: avgQuality,
-        reason: `Reddit(${Array.from(data.sources).join(",")}): ${data.mentions} mentions, ${data.upvotes} upvotes, quality:${(avgQuality * 100).toFixed(0)}%`,
-        timestamp: Date.now(),
-      });
-    }
-  }
-
-  return signals;
-}
 
 /**
  * Gather signals from crypto markets based on momentum.
