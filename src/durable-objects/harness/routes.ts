@@ -132,6 +132,12 @@ export async function handleStatus(ctx: RoutesContext): Promise<Response> {
       momoWatchlist: ctx.state.momoWatchlist ?? [],
       momoWatchlistUpdatedAt: ctx.state.momoWatchlistUpdatedAt ?? 0,
       momoCharts: ctx.state.momoCharts ?? {},
+      momentumLane: {
+        enabled: ctx.state.config.momentum_trading_enabled ?? false,
+        positions: Object.values(ctx.state.momentumPositions ?? {}),
+        trades: (ctx.state.momentumTrades ?? []).slice(-50),
+        dayRealizedUsd: ctx.state.momentumDay?.realizedUsd ?? 0,
+      },
       // DEX positions with live P&L
       dexPositions: dexPositionsWithPnL,
       dexSignals: ctx.state.dexSignals.slice(0, 10), // Top 10 momentum signals

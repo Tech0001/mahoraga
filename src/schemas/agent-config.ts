@@ -13,6 +13,12 @@ export const AgentConfigSchema = z.object({
   momo_price_min: z.number().min(0).max(1000),
   momo_price_max: z.number().min(0).max(10000),
   momo_watchlist_size: z.number().int().min(1).max(50),
+  momentum_trading_enabled: z.boolean(),
+  momentum_position_usd: z.number().min(10).max(100000),
+  momentum_max_positions: z.number().int().min(1).max(20),
+  momentum_daily_loss_cap_usd: z.number().min(0).max(100000),
+  momentum_time_exit_minutes: z.number().min(1).max(390),
+  momentum_take_profit_r: z.number().min(0.5).max(10),
 
   max_position_value: z.number().positive().max(100000),
   max_positions: z.number().int().min(1).max(50),

@@ -59,6 +59,7 @@ import {
 import { fetchCrisisIndicators, evaluateCrisisLevel } from "./harness/crisis";
 import * as dexTrading from "./harness/dex-trading";
 import * as gatherers from "./harness/gatherers";
+import * as momentumTrading from "./harness/momentum-trading";
 import * as twitter from "./harness/twitter";
 import * as llmResearch from "./harness/llm-research";
 import * as trading from "./harness/trading";
@@ -386,6 +387,17 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
 
       if (clock.is_open) {
+        // Momentum lane: structural exits every cycle; entries only when armed.
+        try {
+          const nextCloseMsForMomentum = new Date(clock.next_close).getTime();
+          const minutesToClose = Number.isFinite(nextCloseMsForMomentum)
+            ? (nextCloseMsForMomentum - clockNowMs) / 60000
+            : 390;
+          await momentumTrading.runMomentumTrading(this.getContext(), alpaca, minutesToClose);
+        } catch (e) {
+          this.log("System", "phase_error", { phase: "momentum_trading", error: String(e).slice(0, 160) });
+        }
+
         const marketOpenExecuteWindowMinutes = Math.max(0, this.state.config.market_open_execute_window_minutes ?? 2);
         const lastKnownOpenMs = this.state.lastKnownNextOpenMs;
         const hasOpenMs = lastKnownOpenMs != null && Number.isFinite(lastKnownOpenMs);

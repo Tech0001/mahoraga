@@ -79,6 +79,14 @@ export interface AgentConfig {
   momo_price_max: number;
   momo_watchlist_size: number;
 
+  // Momentum lane execution (Alpaca paper; ships disabled until calibrated)
+  momentum_trading_enabled: boolean;
+  momentum_position_usd: number; // [TUNE] Dollar size per entry
+  momentum_max_positions: number;
+  momentum_daily_loss_cap_usd: number; // [TUNE] Lane halts for the day when breached
+  momentum_time_exit_minutes: number; // [TUNE] Momo trades don't become bagholds
+  momentum_take_profit_r: number; // [TUNE] Target = trigger + R x (trigger - stop)
+
   // Position limits - risk management basics
   max_position_value: number; // [TUNE] Max $ per position
   max_positions: number; // [TUNE] Max concurrent positions
@@ -340,6 +348,33 @@ export interface SocialHistoryEntry {
   sentiment: number;
 }
 
+export interface MomentumPosition {
+  symbol: string;
+  qty: number;
+  entryPrice: number;
+  entryTime: number;
+  plannedStop: number;
+  targetPrice: number;
+  setupAtEntry: string;
+  orderId?: string;
+  entrySnapshot: {
+    score: number;
+    rvol: number;
+    changePct: number;
+    distFromVwapPct: number;
+    blueSky: boolean | null;
+    note: string;
+  };
+}
+
+export interface MomentumTradeRecord extends MomentumPosition {
+  exitPrice: number;
+  exitTime: number;
+  exitReason: string;
+  pnlUsd: number;
+  pnlPct: number;
+}
+
 export interface SocialSnapshotCacheEntry {
   volume: number;
   sentiment: number;
@@ -499,6 +534,10 @@ export interface AgentState {
   lastMomoScanRun: number;
   // Chart-structure reads for watchlist symbols (and later, open positions)
   momoCharts: Record<string, import("./chart-structure").ChartRead>;
+  // Momentum lane: open positions, closed-trade journal, daily loss tracking
+  momentumPositions: Record<string, MomentumPosition>;
+  momentumTrades: MomentumTradeRecord[];
+  momentumDay: { day: string; realizedUsd: number } | null;
   // Daily-context cache (blue sky / overhead) — one bars fetch per symbol per day
   momoDailyContext?: Record<string, { day: string; blueSky: boolean | null; overheadPct: number | null }>;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;
